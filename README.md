@@ -4,4 +4,6 @@
 ```bash
 make up
 make exec
+claude --dangerously-skip-permissions
 ```
+
