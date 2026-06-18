@@ -32,7 +32,7 @@ stop:
 	sbx stop $(CONTAINER_NAME)
 
 rm:
-	sbx rm $(CONTAINER_NAME)
+	sbx rm $(CONTAINER_NAME) --force
 
 exec:
 	# 実行後にカレントディレクトリを移動する: cd $$WORKSPACE_DIR
