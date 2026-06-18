@@ -1,9 +1,10 @@
 # Makefile
-.PHONY: install build run start stop rm exec
+.PHONY: install build up stop down update-makefile
 
 DOCKER_HUB_USERNAME=eycjur
 IMAGE_NAME=claude-sandbox
 CONTAINER_NAME=$(subst _,-,$(shell basename $(CURDIR)))
+UPSTREAM_MAKEFILE=https://raw.githubusercontent.com/eycjur/my-docker-sandbox/main/Makefile
 
 install:
 	brew trust --cask docker/tap/sbx@nightly
@@ -17,23 +18,18 @@ build:
 		--push \
 		.
 
-run:
-	sbx run \
-		--name $(CONTAINER_NAME) \
-		--template $(DOCKER_HUB_USERNAME)/$(IMAGE_NAME) \
-		shell \
-		-- \
-			-l -c 'exec zsh -l'
-
-start:
-	sbx run $(CONTAINER_NAME) -- -l -c 'exec zsh -l'
+up:
+	@sbx ls -q | grep -qx '$(CONTAINER_NAME)' || \
+		sbx create --name $(CONTAINER_NAME) \
+			--template $(DOCKER_HUB_USERNAME)/$(IMAGE_NAME) \
+			shell .
+	sbx exec -it -w $(shell pwd) $(CONTAINER_NAME) zsh -l
 
 stop:
 	sbx stop $(CONTAINER_NAME)
 
-rm:
+down:
 	sbx rm $(CONTAINER_NAME) --force
 
-exec:
-	# 実行後にカレントディレクトリを移動する: cd $$WORKSPACE_DIR
-	sbx exec -it $(CONTAINER_NAME) zsh
+update-makefile:
+	curl -fsSL -o Makefile $(UPSTREAM_MAKEFILE)
