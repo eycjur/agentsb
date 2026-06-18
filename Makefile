@@ -1,9 +1,14 @@
 # Makefile
-.PHONY: build run start stop rm exec
+.PHONY: install build run start stop rm exec
 
 DOCKER_HUB_USERNAME=eycjur
 IMAGE_NAME=claude-sandbox
 CONTAINER_NAME=$(subst _,-,$(shell basename $(CURDIR)))
+
+install:
+	brew trust --cask docker/tap/sbx@nightly
+	brew install docker/tap/sbx
+	sbx login
 
 build:
 	docker build \

@@ -8,9 +8,7 @@
 ### 1. Sandbox CLI のインストール
 
 ```bash
-brew trust --cask docker/tap/sbx@nightly
-brew install docker/tap/sbx
-sbx login
+make install
 ```
 
 ### 2. テンプレートイメージのビルド
