@@ -27,10 +27,11 @@ Docker Hub（`<DOCKER_HUB_USERNAME>/claude-sandbox`）へ push されます。
 ### サンドボックスの起動
 
 ```bash
-make run
+make up
 ```
 
-起動後、コンテナ内で Claude Code を実行します。
+コンテナが未存在の場合は作成し、zsh で接続します。停止中の場合も同じコマンドで再接続できます。  
+接続後、コンテナ内で Claude Code を実行します。
 
 ```bash
 claude --dangerously-skip-permissions
@@ -40,17 +41,13 @@ claude --dangerously-skip-permissions
 
 | コマンド | 説明 |
 |----------|------|
-| `make start` | 停止中のコンテナを再開する |
 | `make stop` | コンテナを停止する |
-| `make rm` | コンテナを削除する |
-| `make exec` | 実行中のコンテナに zsh で接続する |
-
-`make exec` で接続したあと、作業ディレクトリへ移動する場合は `cd $WORKSPACE_DIR` を実行してください。
+| `make down` | コンテナを削除する |
 
 ### ポートの公開
 
 コンテナ内で起動したサーバーなどをホストからアクセスできるようにするには、`sbx ports` でポートを公開します。
 
 ```bash
-make ports PORT=<ポート番号>
+make port PORT=<ポート番号>
 ```
