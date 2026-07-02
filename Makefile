@@ -2,52 +2,65 @@
 .PHONY: help install build run stop rm open update-makefile
 .DEFAULT_GOAL := help
 
-DOCKER_HUB_USERNAME ?= eycjur
-IMAGE_NAME ?= claude-sandbox
 CONTAINER_NAME ?= $(subst _,-,$(shell basename $(CURDIR)))
 WORKSPACE := /home/agent/workspace
 PORT ?= 8000
+MEMORY ?= 8g
+PLATFORM ?= linux/amd64
 UPSTREAM_MAKEFILE := https://raw.githubusercontent.com/eycjur/my-docker-sandbox/main/Makefile
 
-install: ## Apple container のインストールとサービス起動
-	@command -v container >/dev/null || ( \
-		tmp=$$(mktemp -t container).pkg && \
-		curl -fsSL "https://github.com/apple/container/releases/download/1.0.0/container-1.0.0-installer-signed.pkg" -o "$$tmp" && \
-		sudo installer -pkg "$$tmp" -target / && \
-		rm -f "$$tmp" \
-	)
-	container system start --enable-kernel-install
+# yolo モード向け: 権限を落とし、新しい特権取得を禁止
+DOCKER_SECURITY_FLAGS := \
+	--init \
+	--cap-drop=ALL \
+	--security-opt=no-new-privileges \
+	--pids-limit=512 \
+	--memory=$(MEMORY) \
+	--env IS_SANDBOX=1
 
-build: ## CI: arm64 イメージをビルドして push
+install: ## Docker と NVIDIA Container Toolkit の確認
+	@command -v docker >/dev/null || { \
+		echo "docker が必要です: https://docs.docker.com/engine/install/"; \
+		exit 1; \
+	}
+	@docker info >/dev/null 2>&1 || { \
+		echo "Docker daemon が起動していません"; \
+		exit 1; \
+	}
+	@if command -v nvidia-smi >/dev/null 2>&1; then \
+		nvidia-smi >/dev/null 2>&1 || echo "警告: nvidia-smi が失敗しました"; \
+	else \
+		echo "警告: nvidia-smi が見つかりません"; \
+	fi
+	@docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi >/dev/null 2>&1 \
+		|| echo "警告: コンテナから GPU を使えません。nvidia-container-toolkit をインストールしてください"
+
+build: ## CI: イメージをビルドして push
 	docker build \
-		--platform linux/arm64 \
 		--no-cache \
-		-t $(DOCKER_HUB_USERNAME)/$(IMAGE_NAME):latest \
-		--push \
 		.
 
 run: install ## コンテナを作成/起動して zsh に入る
-	@if container inspect "$(CONTAINER_NAME)" >/dev/null 2>&1; then \
-		container start "$(CONTAINER_NAME)" 2>/dev/null || true; \
+	@if docker inspect "$(CONTAINER_NAME)" >/dev/null 2>&1; then \
+		docker start "$(CONTAINER_NAME)" 2>/dev/null || true; \
 	else \
-		container image pull --platform linux/arm64 $(DOCKER_HUB_USERNAME)/$(IMAGE_NAME):latest && \
-		container run -d --init --name "$(CONTAINER_NAME)" --platform linux/arm64 \
+		docker run -d \
+			--name "$(CONTAINER_NAME)" \
+			$(DOCKER_SECURITY_FLAGS) \
+			--gpus all \
+			-p $(PORT):$(PORT) \
 			-v "$$(pwd):$(WORKSPACE)" \
 			-w "$(WORKSPACE)" \
 			--user agent \
-			"$(DOCKER_HUB_USERNAME)/$(IMAGE_NAME):latest" sleep infinity; \
+			"$(CONTAINER_NAME)" sleep infinity; \
 	fi
-	container exec -it -u agent -w "$(WORKSPACE)" "$(CONTAINER_NAME)" zsh -l
-	# メモリ制限上限は、--memory 4g のように指定する
+	docker exec -it -u agent -w "$(WORKSPACE)" "$(CONTAINER_NAME)" zsh -l
 
 stop: ## コンテナを停止
-	container stop "$(CONTAINER_NAME)"
+	docker stop "$(CONTAINER_NAME)"
 
 rm: ## コンテナを削除
-	container rm -f "$(CONTAINER_NAME)" 2>/dev/null || true
-
-open: ## コンテナ IP:PORT をブラウザで開く (PORT=$(PORT))
-	@ip=$$(container inspect $(CONTAINER_NAME)|jq -r '.[0].status.networks[0].ipv4Address|split("/")[0]'); open "http://$$ip:$(PORT)"
+	docker rm -f "$(CONTAINER_NAME)" 2>/dev/null || true
 
 update-makefile: ## 最新の Makefile を取得して更新
 	curl -fsSL -o Makefile $(UPSTREAM_MAKEFILE)
