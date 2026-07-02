@@ -8,6 +8,7 @@ RUN apt-get update \
 		ca-certificates \
 		curl \
 		git \
+		jq \
 		less \
 		make \
 		python-is-python3 \
