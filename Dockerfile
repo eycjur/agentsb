@@ -1,4 +1,7 @@
-FROM ubuntu:26.04
+# OpenShell MicroVM sandbox image (Linux + GPU passthrough)
+# Workspace is /sandbox (OpenShell default). CMD is replaced by the supervisor;
+# pass the start command after `--` on `openshell sandbox create`.
+FROM nvidia/cuda:12.6.3-base-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV IS_SANDBOX=1
@@ -8,6 +11,7 @@ RUN apt-get update \
 		ca-certificates \
 		curl \
 		git \
+		iproute2 \
 		less \
 		make \
 		python-is-python3 \
@@ -15,21 +19,19 @@ RUN apt-get update \
 		ripgrep \
 		sudo \
 		zsh \
-	&& rm -rf /var/lib/apt/lists/* \
-	&& userdel -r ubuntu \
-	&& useradd --create-home --uid 1000 --shell /bin/zsh agent \
-	&& echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent \
-	&& chmod 0440 /etc/sudoers.d/agent
+	&& rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.25 /uv /uvx /bin/
 
-ENV PATH=/home/agent/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+RUN install -d -m 1777 /sandbox
+WORKDIR /sandbox
 
-WORKDIR /home/agent
+ENV PATH=/sandbox/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV HOME=/sandbox
 
-USER agent
-RUN mkdir -p /home/agent/workspace \
-	&& curl -fsSL https://claude.ai/install.sh | bash \
-	&& curl -sSL https://raw.githubusercontent.com/eycjur/dotfiles/main/remote-install.sh | zsh
+# OpenShell VM driver injects sandbox user at runtime (default UID 10001).
+RUN curl -fsSL https://claude.ai/install.sh | bash \
+	&& curl -sSL https://raw.githubusercontent.com/eycjur/dotfiles/main/remote-install.sh | zsh \
+	&& chown -R 10001:10001 /sandbox
 
 CMD ["zsh", "-l"]

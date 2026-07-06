@@ -1,69 +1,53 @@
-# Makefile
-.PHONY: help install build run stop rm open update-makefile
+.PHONY: help install gateway-config run connect rm open upload build
 .DEFAULT_GOAL := help
 
-CONTAINER_NAME ?= $(subst _,-,$(shell basename $(CURDIR)))
-WORKSPACE := /home/agent/workspace
+SANDBOX_NAME ?= $(subst _,-,$(shell basename $(CURDIR)))
+WORKSPACE := /sandbox
 PORT ?= 8000
-MEMORY ?= 8g
-PLATFORM ?= linux/amd64
-UPSTREAM_MAKEFILE := https://raw.githubusercontent.com/eycjur/my-docker-sandbox/main/Makefile
+MEMORY ?= 8Gi
+GPU ?= 1
+GPU_PCI_ID ?= $(shell lspci -D | awk 'BEGIN{IGNORECASE=1} /nvidia/ && /(VGA|3D|Display|3D controller)/ {print $$1; exit}')
 
-# yolo モード向け: 権限を落とし、新しい特権取得を禁止
-DOCKER_SECURITY_FLAGS := \
-	--init \
-	--cap-drop=ALL \
-	--security-opt=no-new-privileges \
-	--pids-limit=512 \
-	--memory=$(MEMORY) \
-	--env IS_SANDBOX=1
-
-install: ## Docker と NVIDIA Container Toolkit の確認
+install: gateway-config ## OpenShell インストール + MicroVM gateway 設定
 	@command -v docker >/dev/null || { \
-		echo "docker が必要です: https://docs.docker.com/engine/install/"; \
-		exit 1; \
+		echo "警告: docker がありません"; \
 	}
-	@docker info >/dev/null 2>&1 || { \
-		echo "Docker daemon が起動していません"; \
-		exit 1; \
+	@command -v openshell >/dev/null || { \
+		curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh; \
 	}
-	@if command -v nvidia-smi >/dev/null 2>&1; then \
-		nvidia-smi >/dev/null 2>&1 || echo "警告: nvidia-smi が失敗しました"; \
-	else \
-		echo "警告: nvidia-smi が見つかりません"; \
-	fi
-	@docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi >/dev/null 2>&1 \
-		|| echo "警告: コンテナから GPU を使えません。nvidia-container-toolkit をインストールしてください"
+	mkdir -p ~/.config/openshell
+	ln -sf openshell/gateway.toml ~/.config/openshell/gateway.toml
+	systemctl --user restart openshell-gateway
+	openshell gateway list
 
-build: ## CI: イメージをビルドして push
-	docker build \
-		--no-cache \
-		.
 
-run: install ## コンテナを作成/起動して zsh に入る
-	@if docker inspect "$(CONTAINER_NAME)" >/dev/null 2>&1; then \
-		docker start "$(CONTAINER_NAME)" 2>/dev/null || true; \
-	else \
-		docker run -d \
-			--name "$(CONTAINER_NAME)" \
-			$(DOCKER_SECURITY_FLAGS) \
-			--gpus all \
-			-p $(PORT):$(PORT) \
-			-v "$$(pwd):$(WORKSPACE)" \
-			-w "$(WORKSPACE)" \
-			--user agent \
-			"$(CONTAINER_NAME)" sleep infinity; \
-	fi
-	docker exec -it -u agent -w "$(WORKSPACE)" "$(CONTAINER_NAME)" zsh -l
+	# @if [ -r /dev/kvm ]; then \
+	# 	echo "KVM: OK (/dev/kvm)"; \
+	# else \
+	# 	echo "警告: /dev/kvm がありません。MicroVM には KVM が必要です"; \
+	# fi
+	# @if [ -d /sys/class/iommu_group ] && [ -n "$$(ls -A /sys/class/iommu_group 2>/dev/null)" ]; then \
+	# 	echo "IOMMU: OK"; \
+	# else \
+	# 	echo "警告: IOMMU が無効の可能性があります (GPU パススルーに必要)"; \
+	# fi
 
-stop: ## コンテナを停止
-	docker stop "$(CONTAINER_NAME)"
+run: ## GPU 付き MicroVM サンドボックスを作成/接続
+	@if ! openshell sandbox get "$(SANDBOX_NAME)" >/dev/null 2>&1; then \
+		openshell sandbox create \
+			--name "$(SANDBOX_NAME)" \
+			--from ./Dockerfile \
+			--gpu $(GPU) \
+			--driver-config-json '{"vm":{"gpu_device_ids":["$(GPU_DEVICE)"]}}' \
+			--memory $(MEMORY) \
+			--upload .:$(WORKSPACE) \
+			--forward $(PORT) \
+			-- sleep infinity; \
+	fi; \
+	openshell sandbox connect "$(SANDBOX_NAME)"
 
-rm: ## コンテナを削除
-	docker rm -f "$(CONTAINER_NAME)" 2>/dev/null || true
-
-update-makefile: ## 最新の Makefile を取得して更新
-	curl -fsSL -o Makefile $(UPSTREAM_MAKEFILE)
+rm: ## サンドボックスを削除
+	openshell sandbox delete "$(SANDBOX_NAME)" 2>/dev/null || true
 
 help: ## このヘルプを表示
 	@grep -Eh '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
