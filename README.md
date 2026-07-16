@@ -2,7 +2,7 @@
 
 [apple/container](https://github.com/apple/container) 上で AI コーディングエージェント（Claude Code など）を使い捨てサンドボックスとして起動する CLI です。
 
-ディレクトリごとに 1 つのサンドボックスを持ち、ベース home（`~/.agentsb/home`）を fork した専用の home を `/home/agent` にマウントするため、複数のサンドボックスを並行して使ってもエージェント同士の状態が衝突しません。セッション終了時には認証情報（`~/.claude/.credentials.json` と `~/.claude.json`）だけをベース home に書き戻します。サンドボックス（コンテナと home）は `agentsb rm` で削除するまで維持されます。
+ディレクトリごとに 1 つのサンドボックスを持ちます。認証情報（`~/.claude/.credentials.json`）だけを、サンドボックス作成時にホストの `~/.agentsb/home` からコンテナへコピーし（`container cp`）、セッション終了時にコピーバックしてログイン状態を共有します。それ以外の状態（`~/.claude.json` のオンボーディング状態や設定を含む）はサンドボックス（コンテナ）ごとに独立しているため、複数のサンドボックスを並行して使ってもエージェント同士は衝突しません。サンドボックスは `agentsb rm` で削除するまで維持されます。
 
 ## 前提
 
@@ -40,7 +40,7 @@ claude --dangerously-skip-permissions
 | `agentsb build` | イメージを強制リビルド（ベースイメージやツールの更新を取り込む。古いイメージは prune） |
 | `agentsb ls` | サンドボックスの一覧（停止中も含む） |
 | `agentsb stop [name]` | コンテナを停止（状態は保持され、次の `run` で再開。名前省略時はカレントディレクトリのもの） |
-| `agentsb rm [name]` | サンドボックスを削除（コンテナと home。名前省略時はカレントディレクトリのもの） |
+| `agentsb rm [name]` | サンドボックスのコンテナを削除（名前省略時はカレントディレクトリのもの。認証情報は他サンドボックスとも共有しているため削除しない） |
 | `agentsb open [port]` | カレントディレクトリのサンドボックスで動くサーバーをブラウザで開く（IP を自動取得。ポート省略時は 8000） |
 
 ## ディレクトリ構成
@@ -49,19 +49,18 @@ claude --dangerously-skip-permissions
 |------|------|
 | `~/.config/agentsb/config.toml` | グローバル設定（任意。無ければデフォルトで動作。`$XDG_CONFIG_HOME` があればそちら優先） |
 | `~/.agentsb/build/` | イメージビルド用の作業ディレクトリ。ビルド時に Containerfile がここへ書き出される |
-| `~/.agentsb/home/` | ベース home。認証情報がここに永続化される |
-| `~/.agentsb/home-runs/` | サンドボックスごとに fork された home（`agentsb rm` で削除されるまで維持） |
+| `~/.agentsb/home/` | 認証情報（`.claude/.credentials.json`）を永続化し、サンドボックス作成時・セッション終了時に `container cp` でコンテナとやり取りする |
 | `~/.agentsb/logs/agentsb.log` | 動作検証用ログ（設定の有無、container CLI 呼び出し、dotfiles の有効/無効など） |
 
 データ側（`~/.agentsb/`）は初回の `agentsb run` で自動生成されます。旧パス `~/.agentsb/config.toml` もまだ読めますが、新規は `~/.config/agentsb/config.toml` を使ってください。
 
 ログは常に `~/.agentsb/logs/agentsb.log` へ追記されます（2 MiB 超で `agentsb.log.1` へローテート）。ターミナルにも同じ行を出したいときは `-v` / `--verbose` を付けてください。dotfiles の clone/install の途中経過はコンテナ内の stderr（セッション画面）にも出ます。
 
-イメージは Ubuntu 26.04 ベースで、Claude Code（npm グローバル）、Node.js、Python + uv、git、ripgrep、zsh などを含みます。`agent` ユーザーはパスワードなしで `sudo` を使えるため、足りないツールはコンテナ内で追加インストールできます（永続化したい場合は Containerfile へ）。
+イメージは Ubuntu 26.04 ベースで、Claude Code（npm グローバル）、Node.js、Python + uv、git、ripgrep、zsh、yazi（`git.yazi` プラグイン込み）などを含みます。`agent` ユーザーはパスワードなしで `sudo` を使えるため、足りないツールはコンテナ内で追加インストールできます（永続化したい場合は Containerfile へ）。
 
-イメージ定義（Containerfile）は agentsb のバイナリに内蔵されており、`~/.agentsb/build/Containerfile` を編集しても次のビルドで上書きされます。定義を変更したい場合はリポジトリの `internal/image/Containerfile` を編集して `make install` で入れ直してください。agentsb の更新で定義が変わると、次回 `run` で自動的にリビルドされ、既存のサンドボックスも新イメージで作り直されます（home は維持されますが、コンテナ内で `apt install` したものなどコンテナ層の変更は消えます）。ビルドコンテキストは `build/` 固定で、認証情報を含む `home/` は含まれません。
+イメージ定義（Containerfile）は agentsb のバイナリに内蔵されており、`~/.agentsb/build/Containerfile` を編集しても次のビルドで上書きされます。定義を変更したい場合はリポジトリの `internal/image/Containerfile` を編集して `make install` で入れ直してください。agentsb の更新で定義が変わると、次回 `run` で自動的にリビルドされ、既存のサンドボックスも新イメージで作り直されます。認証情報は `~/.agentsb/home` に別途永続化されているため保持されますが、それ以外のコンテナ内の状態（dotfiles で管理していない `$HOME` 配下のファイルや `apt install` したものなど）は失われます。dotfiles で管理している内容は再作成時に自動で再適用されます。ビルドコンテキストは `build/` 固定で、認証情報を含む `home/` は含まれません。
 
-初回はコンテナ内でエージェントのログインを一度だけ済ませてください。認証情報は `~/.agentsb/home` に同期され、イメージを作り直しても維持されます。
+初回はコンテナ内でエージェントのログインを一度だけ済ませてください。認証情報はセッション終了時に `~/.agentsb/home` へコピーバックされるため、イメージを作り直しても維持されます。
 
 ## 設定（config.toml）
 
@@ -78,13 +77,13 @@ target_path     = "~/dotfiles"
 install_command = "install.sh"
 ```
 
-`[dotfiles]` を設定すると、セッション開始のたびにリポジトリを clone/pull し、`target_path` 内で `bash <install_command>` を実行してからシェルを起動します。clone や install の失敗は警告のみで、エージェントは起動します。
+`[dotfiles]` を設定すると、サンドボックスの起動時（新規作成・停止からの再開時）にリポジトリを clone/pull し、`target_path` 内で `bash <install_command>` を実行してからシェルを起動します。既に起動済みのサンドボックスへ追加の端末で入る場合は実行しません。clone や install の失敗は警告のみで、エージェントは起動します。
 
 ## herdr 連携
 
 [herdr](https://herdr.dev/) の pane 内で実行すると、pane の表示名（例: `claude (agentsb)`）を自動で herdr に報告します。
 
-エージェントの状態（working/blocked/idle）と完了の検出は herdr 自身に任せます。herdr はホストのプロセスツリーからエージェントを識別して画面内容から状態を検出するため、agentsb はセッション（`container exec`）プロセスの argv[0] をエージェント名に書き換えて、コンテナ内のエージェントをホスト側から識別できるようにしています。herdr 外での実行には影響しません。
+エージェントの状態（working/blocked/idle）と完了の検出は herdr 自身に任せます。herdr はホストのプロセスツリーからエージェントを識別して画面内容から状態を検出するため、agentsb はセッション（`container exec`）プロセスの argv[0] をエージェント名に書き換えて、コンテナ内のエージェントをホスト側から識別できるようにしています。agentsb は Claude Code 専用サンドボックスのため、常に `claude` を設定します。herdr 外での実行には影響しません。
 
 ## 注意点
 

@@ -64,7 +64,7 @@ func EnsureBuilt(uid, gid int, force bool) (string, error) {
 }
 
 // writeBuildContext は埋め込み Containerfile を ~/.agentsb/build/Containerfile
-// へ書き出し、そのパスを返す。専用ディレクトリを使うのは、home/ と home-runs/
+// へ書き出し、そのパスを返す。専用ディレクトリを使うのは、home/
 // （認証情報）を決してビルドコンテキストに入れないため。
 func writeBuildContext() (string, error) {
 	root, err := config.Root()
@@ -80,6 +80,21 @@ func writeBuildContext() (string, error) {
 		return "", fmt.Errorf("cannot write %s: %w", path, err)
 	}
 	return path, nil
+}
+
+// DeleteAll は agentsb-base の全イメージを削除する。`agentsb prune` から呼ばれる。
+func DeleteAll() error {
+	tags, err := container.ListImages(imageBase)
+	if err != nil {
+		return err
+	}
+	var firstErr error
+	for _, tag := range tags {
+		if err := container.DeleteImage(tag); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("delete image %s: %w", tag, err)
+		}
+	}
+	return firstErr
 }
 
 // pruneSuperseded は current 以外の agentsb-base イメージのうち、

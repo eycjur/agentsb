@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 
 	"agentsb/internal/runlog"
 )
@@ -153,6 +155,33 @@ func pathKey(path string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-")
+}
+
+// CopyToContainer はホストのファイルをコンテナ内へコピーする（`container cp`）。
+// bind mount と違い、稼働中・停止中どちらのコンテナに対しても実行できる。
+func CopyToContainer(name, hostPath, containerPath string) error {
+	_, err := runCLI("cp", hostPath, name+":"+containerPath)
+	return err
+}
+
+// CopyFromContainer はコンテナ内のファイルをホストへコピーする（`container cp`）。
+func CopyFromContainer(name, containerPath, hostPath string) error {
+	_, err := runCLI("cp", name+":"+containerPath, hostPath)
+	return err
+}
+
+// Exists はコンテナ内に指定パスが存在するかを返す（稼働中のコンテナが対象）。
+// `container cp` は存在しないパスに対するエラーメッセージがバージョンにより
+// 揺れるため、`exec ... test -e` で明示的に確認する。
+func Exists(name, path string) (bool, error) {
+	err := exec.Command("container", "exec", name, "test", "-e", path).Run()
+	if err == nil {
+		return true, nil
+	}
+	if _, ok := err.(*exec.ExitError); ok {
+		return false, nil
+	}
+	return false, fmt.Errorf("container exec test -e %s: %w", path, err)
 }
 
 // ImageExists は指定タグのイメージがローカルに存在するかを返す。
@@ -317,6 +346,68 @@ func Delete(name string) error {
 func Stop(name string) error {
 	_, err := runCLI("stop", name)
 	return err
+}
+
+// Kill は `container stop` が応答しない場合の最終手段として、OS の
+// プロセスレベルでコンテナに対応するプロセスへ SIGTERM を送る。
+// apple/container はコンテナごとに VM プロセスを起動し、そのコマンドラインに
+// `containers/<name>` を含むため、`ps` の出力からこれを含む行を探して特定する
+// （`container` CLI 自体は経由しない）。
+func Kill(name string) error {
+	out, err := exec.Command("ps", "-axo", "pid,command").Output()
+	if err != nil {
+		return fmt.Errorf("ps: %w", err)
+	}
+
+	needle := "containers/" + name
+	var pids []int
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue // ヘッダー行など
+		}
+		if strings.Contains(strings.Join(fields[1:], " "), needle) {
+			pids = append(pids, pid)
+		}
+	}
+	if len(pids) == 0 {
+		return fmt.Errorf("no process found matching %q", needle)
+	}
+
+	var killErr error
+	for _, pid := range pids {
+		runlog.Info("kill -TERM %d (%s)", pid, name)
+		if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+			runlog.Warn("kill %d failed: %v", pid, err)
+			killErr = err
+		}
+	}
+	return killErr
+}
+
+// DeleteAllAgentsb は agentsb が管理する全コンテナ（実行中・停止中）を
+// 停止・削除する。`agentsb prune` から呼ばれる。
+func DeleteAllAgentsb() error {
+	containers, err := ListAgentsb()
+	if err != nil {
+		return err
+	}
+	var firstErr error
+	for _, c := range containers {
+		if c.State == StateRunning {
+			if err := Stop(c.Name); err != nil && firstErr == nil {
+				firstErr = fmt.Errorf("stop %s: %w", c.Name, err)
+			}
+		}
+		if err := Delete(c.Name); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("delete %s: %w", c.Name, err)
+		}
+	}
+	return firstErr
 }
 
 // InUseImages は存在するコンテナ（停止中を含む）が使っているイメージ参照の

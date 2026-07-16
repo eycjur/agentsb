@@ -2,6 +2,7 @@ FROM ubuntu:26.04
 
 ARG UID=1000
 ARG GID=1000
+ARG YAZI_VERSION=v26.5.6
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV IS_SANDBOX=1
@@ -18,6 +19,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.25 /uv /uvx /bin/
 
+# yazi はターミナルファイラー。バイナリは /usr/bin に入るため home マウントの
+# 影響を受けない。プレビュー機能（画像/動画/PDF）用の依存パッケージも含める。
+RUN apt-get update && \
+    curl -fsSL -o /tmp/yazi.deb \
+      https://github.com/sxyazi/yazi/releases/download/${YAZI_VERSION}/yazi-aarch64-unknown-linux-gnu.deb && \
+    apt-get install -y /tmp/yazi.deb && \
+    rm /tmp/yazi.deb && \
+    rm -rf /var/lib/apt/lists/*
+
 # マウントしたファイルの権限をホストと一致させるため、ホストの UID/GID で
 # agent ユーザーを作成する（ubuntu:26.04 既定の ubuntu ユーザーは UID 衝突回避のため削除）。
 RUN userdel -r ubuntu && \
@@ -26,5 +36,14 @@ RUN userdel -r ubuntu && \
     echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent && \
     chmod 0440 /etc/sudoers.d/agent
 
+# 認証情報ファイルは `container cp` でコンテナ作成後にコピーする
+# （internal/home 参照）。コピー先の親ディレクトリだけ先に用意しておく
+# （/home/agent 自体は useradd --create-home で agent 所有で作成済み）。
+RUN mkdir -p /home/agent/.claude && chown agent:${GID} /home/agent/.claude
+
 USER agent
 WORKDIR /home/agent/workspace
+
+# git.yazi プラグイン本体のみ取得する。init.lua / yazi.toml 側の有効化設定は
+# 各自の dotfiles で管理する想定。
+RUN ya pkg add yazi-rs/plugins:git

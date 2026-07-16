@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -50,10 +49,8 @@ func runRun(_ *cobra.Command, _ []string) error {
 	herdrEnv := herdr.Detect()
 	var herdrAgent string
 	if herdrEnv != nil {
-		herdrAgent = herdrEnv.Agent
-		if herdrAgent == "" {
-			herdrAgent = "zsh"
-		}
+		// agentsb は Claude Code 専用サンドボックスとして固定で報告する。
+		herdrAgent = "claude"
 		herdrEnv.Announce(herdrAgent)
 	}
 
@@ -72,7 +69,8 @@ func runRun(_ *cobra.Command, _ []string) error {
 	}
 
 	// agentsb の更新でイメージ定義が変わっていたら、コンテナだけ作り直す。
-	// home は維持されるため、消えるのはコンテナ層の変更（apt install など）だけ。
+	// 認証情報は ~/.agentsb/home に別途永続化されているため保持されるが、
+	// それ以外のコンテナ層の変更（apt install など）は消える。
 	if info != nil && !strings.HasSuffix(info.Image, image.Tag(uid, gid)) {
 		runlog.Info("image definition changed; recreating sandbox %s (was %s, want tag ending %s)",
 			runName, info.Image, image.Tag(uid, gid))
@@ -88,28 +86,22 @@ func runRun(_ *cobra.Command, _ []string) error {
 		info = nil
 	}
 
+	// 認証情報ファイルをコンテナとやり取りする（詳細は internal/home のコメント）。
+	credFiles, err := home.EnsureCredentialFiles()
+	if err != nil {
+		return fmt.Errorf("cannot prepare credential files: %w", err)
+	}
+
+	created := info == nil
 	if info == nil {
 		imageTag, err := image.EnsureBuilt(uid, gid, false)
 		if err != nil {
 			return err
 		}
-		runHome, err := home.Ensure(runName)
-		if err != nil {
-			return fmt.Errorf("cannot prepare home: %w", err)
-		}
-		runlog.Info("prepared home %s", runHome)
-		// workspace のマウントは home のマウントの内側にネストする。ランタイムが
-		// 指定順にマウントしても workspace が隠れないよう home を先に並べ、home に
-		// マウントポイントが無ければ作成しておく。
-		workspaceRel := strings.TrimPrefix(container.Workdir, container.HomeDir+"/")
-		if err := os.MkdirAll(filepath.Join(runHome, workspaceRel), 0755); err != nil {
-			return fmt.Errorf("cannot create workspace mountpoint: %w", err)
-		}
 		spec := container.CreateSpec{
 			Name:  runName,
 			Image: imageTag,
 			Mounts: []container.Mount{
-				{Host: runHome, Dest: container.HomeDir},
 				{Host: cwd, Dest: container.Workdir},
 			},
 			CPUs:   cfg.Container.CPUs,
@@ -125,18 +117,29 @@ func runRun(_ *cobra.Command, _ []string) error {
 		fmt.Fprintln(os.Stderr, "agentsb: warning: --cpus/--memory apply only when the sandbox is created — `agentsb rm` first to apply them")
 	}
 
-	if info.State != container.StateRunning {
+	justStarted := info.State != container.StateRunning
+	if justStarted {
 		runlog.Info("starting sandbox %s", runName)
 		if err := container.Start(runName); err != nil {
 			return err
 		}
 	}
 
+	// `container cp` は稼働中のコンテナにしか使えないため、Start の後に注入する
+	// （詳細は internal/home のコメント）。
+	if created {
+		if err := home.InjectCredentials(runName, credFiles); err != nil {
+			return fmt.Errorf("cannot inject credentials: %w", err)
+		}
+	}
+
 	// セッションはログインシェル固定。エージェントはシェル内から手動で起動する。
-	// [dotfiles] が設定されていれば、clone/インストールを済ませてからシェルへ
-	// exec する起動スクリプトで包む（詳細は internal/dotfiles）。
+	// [dotfiles] が設定されていれば、サンドボックスの起動時（新規作成・再開時）
+	// のみ clone/インストールを済ませてからシェルへ exec する起動スクリプトで
+	// 包む（詳細は internal/dotfiles）。既に動いているサンドボックスへ追加の
+	// 端末で入るだけの場合は、毎回のclone/pullが冗長なためスキップする。
 	command := []string{"zsh", "-l"}
-	if cfg.Dotfiles.Repository != "" {
+	if justStarted && cfg.Dotfiles.Repository != "" {
 		command = dotfiles.Command(
 			cfg.Dotfiles.Repository,
 			cfg.Dotfiles.TargetPath,
@@ -144,24 +147,24 @@ func runRun(_ *cobra.Command, _ []string) error {
 			command,
 		)
 		runlog.Info("session will bootstrap dotfiles then exec %v", []string{"zsh", "-l"})
+	} else if cfg.Dotfiles.Repository != "" {
+		runlog.Info("session command: %v (dotfiles bootstrap skipped: sandbox already running)", command)
 	} else {
 		runlog.Info("session command: %v (dotfiles disabled)", command)
 	}
 
-	runlog.Info("exec session argv0=%q command=%v", herdrAgent, command)
+	runlog.Info("exec session herdrAgent=%q command=%v", herdrAgent, command)
 	code, err := execSession(runName, herdrAgent, command)
 	runlog.Info("session finished exit=%d err=%v", code, err)
 
-	// セッションの終わり方によらず、認証情報の同期は必ず行う。コンテナと home は
-	// `rm` まで維持される。完了の herdr への報告は不要: exec プロセスの終了とともに
-	// argv[0] がプロセスツリーから消え、herdr が自前で検出する。
-	if runHome, homeErr := home.Path(runName); homeErr == nil {
-		if syncErr := home.SyncCredentials(runHome); syncErr != nil {
-			runlog.Warn("could not sync credentials: %v", syncErr)
-			fmt.Fprintf(os.Stderr, "agentsb: warning: could not sync credentials: %v\n", syncErr)
-		} else {
-			runlog.Info("synced credentials from %s", runHome)
-		}
+	// セッションの終わり方によらず、認証情報の同期は必ず行う。コンテナは
+	// `rm` まで維持される。完了の herdr への報告は不要: exec プロセスの終了後、
+	// herdr が自前で検出する。
+	if syncErr := home.ExtractCredentials(runName, credFiles); syncErr != nil {
+		runlog.Warn("could not sync credentials: %v", syncErr)
+		fmt.Fprintf(os.Stderr, "agentsb: warning: could not sync credentials: %v\n", syncErr)
+	} else {
+		runlog.Info("synced credentials for %s", runName)
 	}
 
 	if err != nil {
@@ -198,16 +201,28 @@ func logConfig(cfg config.Config) {
 
 // execSession は稼働中のサンドボックスで `container exec` を前面実行し、
 // セッションの終了コードを返す。
-// argv0 が空でなければ、exec プロセスの argv[0] をその名前に書き換える:
-// herdr はホストのプロセスツリーからエージェントを識別して画面内容の状態検出を
-// 行うため、コンテナ内で動くエージェントの名前をホスト側プロセスに映しておく。
-func execSession(name, argv0 string, command []string) (int, error) {
-	args := container.ExecArgs(name, term.IsTerminal(int(os.Stdin.Fd())), command)
+// herdrAgent が空でなければ、この `container exec` プロセス自身（ホスト側）の
+// argv[0] をその名前に書き換える: herdr はホストのプロセスツリーからエージェ
+// ントを識別し、その識別を前提に画面内容から状態を検出するため、コンテナ内の
+// エージェント名をホスト側プロセスの argv[0] に映しておく。
+// tty 接続時は `container exec` を新しいプロセスグループにして端末の
+// フォアグラウンドグループへ昇格させる（Setpgid+Foreground）。herdr は
+// フォアグラウンドの pgid が変化したことを再検出のトリガーにしており、
+// agentsb と同じ pgid のまま子として起動すると（コンテナの起動待ちの後に
+// この子プロセスが現れても）pgid が変化せず、argv[0] のヒントを持つ
+// プロセスの出現に herdr が気づけない。
+func execSession(name, herdrAgent string, command []string) (int, error) {
+	tty := term.IsTerminal(int(os.Stdin.Fd()))
+	args := container.ExecArgs(name, tty, command)
 	cmd := exec.Command("container", args...)
-	if argv0 != "" {
-		cmd.Args[0] = argv0
-		// 将来 herdr が env ヒントを拾えるようにしておく。
-		cmd.Env = append(os.Environ(), "HERDR_AGENT="+argv0)
+	if herdrAgent != "" {
+		cmd.Args[0] = herdrAgent
+	}
+	if tty {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Foreground: true,
+			Ctty:       int(os.Stdin.Fd()),
+		}
 	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

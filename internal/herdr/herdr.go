@@ -24,7 +24,6 @@ import (
 type Env struct {
 	PaneID  string
 	BinPath string
-	Agent   string
 }
 
 // Detect は herdr の pane 内で動いているかを環境変数から判定し、
@@ -40,7 +39,6 @@ func Detect() *Env {
 	return &Env{
 		PaneID:  paneID,
 		BinPath: os.Getenv("HERDR_BIN_PATH"),
-		Agent:   os.Getenv("HERDR_AGENT"),
 	}
 }
 

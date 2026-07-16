@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	"agentsb/internal/config"
 	"agentsb/internal/container"
-	"agentsb/internal/home"
 	"agentsb/internal/image"
 	"agentsb/internal/runlog"
 
@@ -26,7 +26,8 @@ func main() {
 // execute は CLI を実行し、プロセスの終了ステータスを返す。
 func execute() int {
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "mirror diagnostic logs to stderr")
-	rootCmd.AddCommand(runCmd, buildCmd, lsCmd, stopCmd, rmCmd, openCmd)
+	pruneCmd.Flags().BoolVarP(&pruneYes, "yes", "y", false, "skip confirmation prompt")
+	rootCmd.AddCommand(runCmd, buildCmd, lsCmd, stopCmd, killCmd, rmCmd, pruneCmd, openCmd)
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
 		runlog.SetVerbose(verboseFlag)
 		runlog.Open()
@@ -160,6 +161,75 @@ var stopCmd = &cobra.Command{
 	},
 }
 
+// killCmd は agentsb kill コマンド。`container stop` が応答しない場合の
+// 最終手段として、OS のプロセスレベルでコンテナを強制終了する
+// （`container` CLI 自体は経由しない）。
+var killCmd = &cobra.Command{
+	Use:   "kill [name]",
+	Short: "Force-kill a sandbox at the OS process level (last resort when `container stop` is unresponsive; defaults to the current directory's)",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name, err := targetName(args)
+		if err != nil {
+			return err
+		}
+		if err := container.Kill(name); err != nil {
+			return fmt.Errorf("kill %s: %w", name, err)
+		}
+		fmt.Printf("killed %s\n", name)
+		return nil
+	},
+}
+
+// pruneYes は prune の -y/--yes。確認プロンプトをスキップする。
+var pruneYes bool
+
+// pruneCmd は agentsb prune コマンド。agentsb が管理する全コンテナ・全イメージ・
+// 認証情報・ビルド作業ディレクトリを削除するフルリセット。認証情報が消えるため
+// 次回 run では各サンドボックスで再ログインが必要になる。
+var pruneCmd = &cobra.Command{
+	Use:   "prune",
+	Short: "Remove all agentsb sandboxes, images, and stored credentials (full reset)",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if !pruneYes && !confirmPrune() {
+			fmt.Println("aborted")
+			return nil
+		}
+		if err := container.EnsureRunning(); err != nil {
+			return err
+		}
+
+		var errs []string
+		if err := container.DeleteAllAgentsb(); err != nil {
+			errs = append(errs, err.Error())
+		}
+		if err := image.DeleteAll(); err != nil {
+			errs = append(errs, err.Error())
+		}
+		root, err := config.Root()
+		if err != nil {
+			return err
+		}
+		if err := os.RemoveAll(root); err != nil {
+			errs = append(errs, err.Error())
+		}
+		if len(errs) > 0 {
+			return fmt.Errorf("prune finished with errors: %s", strings.Join(errs, "; "))
+		}
+		fmt.Println("pruned all agentsb sandboxes, images, and credentials")
+		return nil
+	},
+}
+
+// confirmPrune は破壊的な操作であることを明示し、標準入力で確認を取る。
+func confirmPrune() bool {
+	fmt.Print("This removes all agentsb sandboxes, images, and stored credentials. Continue? [y/N] ")
+	var reply string
+	fmt.Scanln(&reply)
+	return strings.ToLower(strings.TrimSpace(reply)) == "y"
+}
+
 // openCmd は agentsb open コマンド。カレントディレクトリのサンドボックスの
 // IP を調べ、コンテナ内で動くサーバーをホストのブラウザで開く。
 // apple/container はコンテナごとに macOS ホストから直接届く IP を割り当てる
@@ -206,12 +276,14 @@ var openCmd = &cobra.Command{
 	},
 }
 
-// rmCmd は agentsb rm コマンド。サンドボックスのコンテナと home を削除する。
-// 名前を省略するとカレントディレクトリのサンドボックスを対象にする。
+// rmCmd は agentsb rm コマンド。サンドボックスのコンテナを削除する。
+// 認証情報は `~/.agentsb/home` に別途永続化されており、他のサンドボックスとも
+// 共有しているため、ここでは削除しない。名前を省略するとカレントディレクトリの
+// サンドボックスを対象にする。
 var rmCmd = &cobra.Command{
 	Use:     "rm [name]",
 	Aliases: []string{"delete", "remove"},
-	Short:   "Remove a sandbox and its home (defaults to the current directory's)",
+	Short:   "Remove a sandbox (defaults to the current directory's)",
 	Args:    cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := container.EnsureRunning(); err != nil {
@@ -225,25 +297,17 @@ var rmCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		runHome, err := home.Path(name)
-		if err != nil {
+		if info == nil {
+			return fmt.Errorf("no sandbox named %s", name)
+		}
+		if info.State == container.StateRunning {
+			if err := container.Stop(name); err != nil {
+				return fmt.Errorf("stop %s: %w", name, err)
+			}
+		}
+		if err := container.Delete(name); err != nil {
 			return err
 		}
-		if info == nil {
-			if _, err := os.Stat(runHome); os.IsNotExist(err) {
-				return fmt.Errorf("no sandbox named %s", name)
-			}
-		} else {
-			if info.State == container.StateRunning {
-				if err := container.Stop(name); err != nil {
-					return fmt.Errorf("stop %s: %w", name, err)
-				}
-			}
-			if err := container.Delete(name); err != nil {
-				return err
-			}
-		}
-		home.Cleanup(runHome)
 		fmt.Printf("removed %s\n", name)
 		return nil
 	},
