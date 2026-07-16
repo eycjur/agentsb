@@ -1,0 +1,30 @@
+FROM ubuntu:26.04
+
+ARG UID=1000
+ARG GID=1000
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV IS_SANDBOX=1
+
+# claude は npm で /usr/local/bin に入れる: /home/agent をマウントで差し替えても
+# バイナリが隠れないようにするため（ユーザーローカルのインストールは不可）。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl git jq less make sudo \
+      python-is-python3 python3 ripgrep zsh && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y nodejs && \
+    npm install -g @anthropic-ai/claude-code && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:0.11.25 /uv /uvx /bin/
+
+# マウントしたファイルの権限をホストと一致させるため、ホストの UID/GID で
+# agent ユーザーを作成する（ubuntu:26.04 既定の ubuntu ユーザーは UID 衝突回避のため削除）。
+RUN userdel -r ubuntu && \
+    (getent group ${GID} || groupadd -g ${GID} agent) && \
+    useradd --create-home --uid ${UID} --gid ${GID} --shell /bin/zsh agent && \
+    echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent && \
+    chmod 0440 /etc/sudoers.d/agent
+
+USER agent
+WORKDIR /home/agent/workspace

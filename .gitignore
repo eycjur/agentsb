@@ -1,0 +1,13 @@
+# ビルド成果物
+/agentsb
+
+# テストバイナリ、カバレッジ出力
+*.test
+*.out
+
+# OS
+.DS_Store
+
+# エディタ
+.vscode/
+.idea/
