@@ -42,13 +42,13 @@ func Detect() *Env {
 	}
 }
 
-// Announce はコンテナ起動前に pane の表示名（例: "claude (agentsb)"）を報告する。
+// Announce はコンテナ起動前に pane の表示名を "agentsb" として報告する。
 // --agent は渡さない: herdr 側のガードがホストのプロセスツリー由来のラベルとの
 // 一致を要求するため、表示名だけを更新する。
-func (e *Env) Announce(agent string) {
+func (e *Env) Announce() {
 	e.run("pane", "report-metadata", e.PaneID,
 		"--source", "user:agentsb",
-		"--display-agent", agent+" (agentsb)",
+		"--display-agent", "agentsb",
 	)
 }
 

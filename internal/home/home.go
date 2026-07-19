@@ -39,13 +39,20 @@ type CredentialFile struct {
 	SyncIfNewer bool
 }
 
-// credentialSpecs は同期対象ファイルの一覧。.claude/.credentials.json は
-// セッション中にリフレッシュされる OAuth トークンで後勝ちで問題ない。
-// .claude.json（オンボーディングや設定の状態）はホスト側の手動編集を尊重
-// したいため、コンテナ側で更新された場合のみ書き戻す。
+// credentialSpecs は同期対象ファイルの一覧。.claude/.credentials.json と
+// .codex/auth.json は、それぞれセッション中にリフレッシュされる OAuth
+// トークンで後勝ちで問題ない。.claude.json（オンボーディングや設定の状態）
+// はホスト側の手動編集を尊重したいため、コンテナ側で更新された場合のみ
+// 書き戻す。claude/codex どちらを使うかはコンテナ内でユーザーが手動起動
+// するまで agentsb 側からは分からないため、両方を常に同期対象にする
+// （ホスト側に存在しないファイルは InjectCredentials 側でスキップされる）。
+// .codex/config.toml は同期対象に含めない: `container cp` での書き戻しが
+// apple/container 側の XPC 接続不良でハングし、セッション終了処理全体が
+// 固まる事象があったため（他ファイルは問題なく同期できていた）。
 var credentialSpecs = []credentialSpec{
 	{relPath: filepath.Join(".claude", ".credentials.json"), syncIfNewer: false},
 	{relPath: ".claude.json", syncIfNewer: true},
+	{relPath: filepath.Join(".codex", "auth.json"), syncIfNewer: false},
 }
 
 // EnsureCredentialFiles はコピー先ディレクトリの存在を保証し、コンテナとの

@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"agentsb/internal/config"
@@ -49,9 +48,14 @@ func runRun(_ *cobra.Command, _ []string) error {
 	herdrEnv := herdr.Detect()
 	var herdrAgent string
 	if herdrEnv != nil {
-		// agentsb は Claude Code 専用サンドボックスとして固定で報告する。
+		// TODO: herdr はエージェントごとに専用の画面マニフェストで状態を検出して
+		// おり、汎用プレースホルダーでは検出できない（herdr.dev/docs/agents/ 参照）。
+		// Codex CLI を herdr 側でも正しく検出させるには、コンテナ内での実際の起動を
+		// 検知して herdr agent rename 等で動的に切り替える対応が別途必要。
+		// それまでは Claude Code 前提の固定値に戻す（Codex 利用時は herdr 側の
+		// 状態表示が claude のまま不正確になる既知の制約）。
 		herdrAgent = "claude"
-		herdrEnv.Announce(herdrAgent)
+		herdrEnv.Announce()
 	}
 
 	uid, gid := container.HostIDs()
@@ -68,23 +72,8 @@ func runRun(_ *cobra.Command, _ []string) error {
 		runlog.Info("sandbox %s state=%s image=%s ip=%s", info.Name, info.State, info.Image, info.IP)
 	}
 
-	// agentsb の更新でイメージ定義が変わっていたら、コンテナだけ作り直す。
-	// 認証情報は ~/.agentsb/home に別途永続化されているため保持されるが、
-	// それ以外のコンテナ層の変更（apt install など）は消える。
-	if info != nil && !strings.HasSuffix(info.Image, image.Tag(uid, gid)) {
-		runlog.Info("image definition changed; recreating sandbox %s (was %s, want tag ending %s)",
-			runName, info.Image, image.Tag(uid, gid))
-		fmt.Fprintf(os.Stderr, "agentsb: image definition changed, recreating sandbox %s…\n", runName)
-		if info.State == container.StateRunning {
-			if err := container.Stop(runName); err != nil {
-				return fmt.Errorf("stop %s: %w", runName, err)
-			}
-		}
-		if err := container.Delete(runName); err != nil {
-			return err
-		}
-		info = nil
-	}
+	// 既存のサンドボックスがあれば、イメージ定義が変わっていてもそのまま使い続ける
+	// （作り直すと apt install などコンテナ層への変更が消えるため）。
 
 	// 認証情報ファイルをコンテナとやり取りする（詳細は internal/home のコメント）。
 	credFiles, err := home.EnsureCredentialFiles()
@@ -176,19 +165,15 @@ func runRun(_ *cobra.Command, _ []string) error {
 
 // logConfig は読み込んだ設定の要点をログに残す（dotfiles 未設定の取りこぼし防止）。
 func logConfig(cfg config.Config) {
-	preferred, _ := config.GlobalPath()
-	cfgPath := config.LoadedPath()
-	if _, err := os.Stat(cfgPath); err != nil {
-		runlog.Info("config file missing path=%s (using defaults)", preferred)
+	path, _ := config.GlobalPath()
+	if _, err := os.Stat(path); err != nil {
+		runlog.Info("config file missing path=%s (using defaults)", path)
 	} else {
-		runlog.Info("config file loaded path=%s", cfgPath)
-		if preferred != "" && cfgPath != preferred {
-			runlog.Info("config: using legacy path; move to %s when convenient", preferred)
-		}
+		runlog.Info("config file loaded path=%s", path)
 	}
 	runlog.Info("config container cpus=%d memory=%s", cfg.Container.CPUs, cfg.Container.Memory)
 	if cfg.Dotfiles.Repository == "" {
-		runlog.Info("config dotfiles=disabled (set [dotfiles].repository in %s)", preferred)
+		runlog.Info("config dotfiles=disabled (set [dotfiles].repository in %s)", path)
 		return
 	}
 	target := cfg.Dotfiles.TargetPath

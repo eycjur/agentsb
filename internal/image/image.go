@@ -25,8 +25,8 @@ const imageBase = "agentsb-base"
 var containerfile string
 
 // Tag は埋め込み Containerfile と UID/GID に対応するイメージタグを返す。
-// タグには定義内容のハッシュが含まれるため、既存コンテナのイメージ参照と
-// 比較すれば定義の変更を検知できる。
+// タグには定義内容のハッシュが含まれるため、Containerfile の変更は
+// 新しいタグとして表れる（新規イメージのビルド判定に使う）。
 func Tag(uid, gid int) string {
 	sum := sha256.Sum256([]byte(containerfile))
 	return fmt.Sprintf("%s:%d-%d-%x", imageBase, uid, gid, sum[:6])

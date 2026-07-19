@@ -2,6 +2,7 @@ package container
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -15,6 +16,11 @@ import (
 
 	"agentsb/internal/runlog"
 )
+
+// cliTimeout は `container` サブコマンド1回あたりの上限。system service
+// （XPC 経由でVMを管理するデーモン）が無応答になった場合でも、agentsb 側が
+// 無限に固まらないようにするための保険。
+const cliTimeout = 5 * time.Second
 
 const (
 	// HomeDir はコンテナ側の home ディレクトリのパス。
@@ -53,14 +59,21 @@ func EnsureRunning() error {
 }
 
 // runCLI は `container` サブコマンドを実行し、失敗時は stderr をエラーに含める。
-// 成功時の stdout を返す。呼び出し内容は runlog に残す。
+// 成功時の stdout を返す。呼び出し内容は runlog に残す。system service が
+// 無応答になっても固まらないよう cliTimeout で打ち切る。
 func runCLI(args ...string) ([]byte, error) {
 	runlog.Info("container %s", strings.Join(args, " "))
-	cmd := exec.Command("container", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), cliTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "container", args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			runlog.Warn("container %s timed out after %s", strings.Join(args, " "), cliTimeout)
+			return out, fmt.Errorf("container %s: timed out after %s (system service may be unresponsive)", strings.Join(args, " "), cliTimeout)
+		}
 		detail := strings.TrimSpace(stderr.String())
 		if detail == "" {
 			detail = strings.TrimSpace(string(out))
@@ -205,11 +218,17 @@ func SetModTime(name, path string, t time.Time) error {
 
 // Exists はコンテナ内に指定パスが存在するかを返す（稼働中のコンテナが対象）。
 // `container cp` は存在しないパスに対するエラーメッセージがバージョンにより
-// 揺れるため、`exec ... test -e` で明示的に確認する。
+// 揺れるため、`exec ... test -e` で明示的に確認する。system service が
+// 無応答になっても固まらないよう cliTimeout で打ち切る。
 func Exists(name, path string) (bool, error) {
-	err := exec.Command("container", "exec", name, "test", "-e", path).Run()
+	ctx, cancel := context.WithTimeout(context.Background(), cliTimeout)
+	defer cancel()
+	err := exec.CommandContext(ctx, "container", "exec", name, "test", "-e", path).Run()
 	if err == nil {
 		return true, nil
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		return false, fmt.Errorf("container exec test -e %s: timed out after %s (system service may be unresponsive)", path, cliTimeout)
 	}
 	if _, ok := err.(*exec.ExitError); ok {
 		return false, nil
