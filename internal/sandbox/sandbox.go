@@ -87,16 +87,37 @@ func Create(name, template, workspace string) error {
 		return fmt.Errorf("sbx create: %w", err)
 	}
 	runlog.Info("created sandbox %s template=%s workspace=%s", name, template, workspace)
+	StopShellAptRefresh(name)
 	return nil
+}
+
+// StopShellAptRefresh は sbx の shell エージェントが起動時にバックグラウンドで
+// 走らせる `apt-get update -qq` を止める。プロキシ経由で Ubuntu ミラーへの
+// 接続がハングすると apt ロックを握り続け、ユーザーの apt を阻害するため。
+// マッチは shell 起動コマンド固有の `-qq` に限定し、手動の apt update は対象外。
+// プロセスが無い場合の pkill 失敗は無視する。
+func StopShellAptRefresh(name string) {
+	if _, err := runCLI(cliTimeout, "exec", name, "sudo", "pkill", "-f", "apt-get update -qq"); err != nil {
+		runlog.Info("shell apt-get refresh not running (or already finished): %v", err)
+		return
+	}
+	runlog.Info("stopped shell agent apt-get refresh in %s", name)
 }
 
 // ExecArgs は起動済みサンドボックスでセッションを開始する `sbx exec` の引数列を
 // 返す。実行ユーザーはイメージの USER（agent）がそのまま使われ、作業ディレクトリ
 // は -w で指定する（sbx はワークスペースをホストと同じパスにマウントする）。
-func ExecArgs(name, workdir string, tty bool, command []string) []string {
+// env は `KEY=VALUE` 形式（set-custom のプレースホルダなど）。`-e` で渡す。
+func ExecArgs(name, workdir string, tty bool, env []string, command []string) []string {
 	args := []string{"exec", "-i"}
 	if tty {
 		args = append(args, "-t")
+	}
+	for _, e := range env {
+		if e == "" {
+			continue
+		}
+		args = append(args, "-e", e)
 	}
 	args = append(args, "-w", workdir, name)
 	return append(args, command...)
@@ -200,6 +221,17 @@ func Remove(name string) error {
 func PublishPort(name string, port int) error {
 	p := strconv.Itoa(port)
 	_, err := runCLI(cliTimeout, "ports", name, "--publish", p+":"+p)
+	return err
+}
+
+// AllowNetwork はサンドボックスに対し、指定ホストへの外向き通信を許可する。
+// sbx secret set-custom の対象ドメインは allow されていないと注入に失敗するため、
+// カスタムシークレット登録前に呼ぶ。
+func AllowNetwork(name string, hosts []string) error {
+	if len(hosts) == 0 {
+		return nil
+	}
+	_, err := runCLI(cliTimeout, "policy", "allow", "network", "--sandbox", name, strings.Join(hosts, ","))
 	return err
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"agentsb/internal/config"
 	"agentsb/internal/dotfiles"
+	"agentsb/internal/envsecret"
 	"agentsb/internal/herdr"
 	"agentsb/internal/home"
 	"agentsb/internal/image"
@@ -98,15 +99,23 @@ func runRun(_ *cobra.Command, _ []string) error {
 			cfg.Dotfiles.InstallCommand,
 			command,
 		)
-		runlog.Info("session will bootstrap dotfiles then exec %v", []string{"zsh", "-l"})
+		runlog.Info("session will bootstrap dotfiles then exec zsh -l")
 	} else if cfg.Dotfiles.Repository != "" {
-		runlog.Info("session command: %v (dotfiles bootstrap skipped: sandbox already exists)", command)
+		runlog.Info("session command: zsh -l (dotfiles bootstrap skipped: sandbox already exists)")
 	} else {
-		runlog.Info("session command: %v (dotfiles disabled)", command)
+		runlog.Info("session command: zsh -l (dotfiles disabled)")
+	}
+
+	// ~/.config/agentsb/secrets.toml の [[secret]] をプロキシ注入（実値はコンテナに入れない）
+	secretEnv, err := envsecret.Sync(runName)
+	if err != nil {
+		return fmt.Errorf("secrets: %w", err)
 	}
 
 	runlog.Info("exec session herdrAgent=%q command=%v", herdrAgent, command)
-	code, err := execSession(runName, cwd, herdrAgent, command)
+	// 停止からの再開でも shell の apt-get update が再度走るため、セッション前に止める。
+	sandbox.StopShellAptRefresh(runName)
+	code, err := execSession(runName, cwd, herdrAgent, secretEnv, command)
 	runlog.Info("session finished exit=%d err=%v", code, err)
 
 	// セッションの終わり方によらず、認証情報の同期は必ず行う。サンドボックスは
@@ -157,9 +166,9 @@ func logConfig(cfg config.Config) {
 // が変化したことを再検出のトリガーにしており、agentsb と同じ pgid のまま子と
 // して起動すると（サンドボックスの起動待ちの後にこの子プロセスが現れても）
 // pgid が変化せず、argv[0] のヒントを持つプロセスの出現に herdr が気づけない。
-func execSession(name, workdir, herdrAgent string, command []string) (int, error) {
+func execSession(name, workdir, herdrAgent string, env []string, command []string) (int, error) {
 	tty := term.IsTerminal(int(os.Stdin.Fd()))
-	args := sandbox.ExecArgs(name, workdir, tty, command)
+	args := sandbox.ExecArgs(name, workdir, tty, env, command)
 	cmd := exec.Command("sbx", args...)
 	if herdrAgent != "" {
 		cmd.Args[0] = herdrAgent

@@ -62,7 +62,7 @@ func EnsureBuilt(force bool) (string, error) {
 	}
 	runlog.Info("building template %s force=%v containerfile=%s", tag, force, cf)
 	fmt.Fprintf(os.Stderr, "agentsb: building %s (this may take a few minutes)…\n", tag)
-	if err := buildImage(cf, filepath.Dir(cf), tag); err != nil {
+	if err := buildImage(cf, filepath.Dir(cf), tag, force); err != nil {
 		return "", fmt.Errorf("image build failed: %w", err)
 	}
 
@@ -104,8 +104,13 @@ func writeBuildContext() (string, error) {
 // buildImage は Containerfile からホストの Docker でイメージをビルドする。
 // ビルドログは stderr へ流す。プラットフォームは指定せずホストネイティブで
 // ビルドする（sbx の microVM はホストと同じアーキテクチャ）。
-func buildImage(containerfile, contextDir, tag string) error {
-	args := []string{"build", "-f", containerfile, "-t", tag, contextDir}
+// noCache が true（agentsb build）のときはレイヤーキャッシュを使わない。
+func buildImage(containerfile, contextDir, tag string, noCache bool) error {
+	args := []string{"build"}
+	if noCache {
+		args = append(args, "--no-cache")
+	}
+	args = append(args, "-f", containerfile, "-t", tag, contextDir)
 	runlog.Info("docker %s", strings.Join(args, " "))
 	cmd := exec.Command("docker", args...)
 	cmd.Stdout = os.Stderr
