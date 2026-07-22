@@ -190,9 +190,7 @@ func Has(name string) (bool, error) {
 	return false, nil
 }
 
-// ListOutput は `sbx ls` の出力をそのまま返す。`agentsb ls` はこれを
-// agentsb- プレフィックスでフィルタして表示する（状態などのカラム構成は
-// sbx に任せ、agentsb 側でパースしない）。
+// ListOutput は `sbx ls` の出力をそのまま返す。
 func ListOutput() (string, error) {
 	out, err := runCLI(cliTimeout, "ls")
 	if err != nil {

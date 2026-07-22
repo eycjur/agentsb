@@ -86,9 +86,8 @@ var buildCmd = &cobra.Command{
 	},
 }
 
-// lsCmd は agentsb ls コマンド。agentsb のサンドボックスを一覧する。
-// カラム構成（状態など）は `sbx ls` の出力に任せ、agentsb 管理分だけを
-// フィルタして表示する。
+// lsCmd は agentsb ls コマンド。agentsb 管理サンドボックスを一覧する。
+// NAME は完全名から agentsb- を削ったもの、SBX NAME は sbx 上の完全名。
 var lsCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list", "ps"},
@@ -103,22 +102,50 @@ var lsCmd = &cobra.Command{
 			return err
 		}
 		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-		var rows []string
+		table := [][]string{{"NAME", "SBX NAME", "STATUS", "PORTS", "WORKSPACE"}}
 		for i, line := range lines {
-			// 先頭行はヘッダーとして残し、以降は agentsb 管理分のみ表示する。
-			if i == 0 || strings.Contains(line, sandbox.NamePrefix) {
-				rows = append(rows, line)
+			if i == 0 {
+				continue
 			}
+			fields := strings.Fields(line)
+			// sbx ls: NAME AGENT STATUS [PORTS] WORKSPACE — AGENT は除く
+			if len(fields) < 4 || !strings.HasPrefix(fields[0], sandbox.NamePrefix) {
+				continue
+			}
+			full := fields[0]
+			short := strings.TrimPrefix(full, sandbox.NamePrefix)
+			status, ports, ws := fields[2], "", fields[3]
+			if len(fields) >= 5 {
+				ports = fields[3]
+				ws = strings.Join(fields[4:], " ")
+			}
+			table = append(table, []string{short, full, status, ports, ws})
 		}
-		if len(rows) <= 1 {
+		if len(table) == 1 {
 			fmt.Println("no agentsb sandboxes")
 			return nil
 		}
-		for _, line := range rows {
-			fmt.Println(line)
-		}
+		printTable(table)
 		return nil
 	},
+}
+
+func printTable(table [][]string) {
+	widths := make([]int, len(table[0]))
+	for _, row := range table {
+		for i, col := range row {
+			if n := len(col); n > widths[i] {
+				widths[i] = n
+			}
+		}
+	}
+	for _, row := range table {
+		parts := make([]string, len(row))
+		for i, col := range row {
+			parts[i] = col + strings.Repeat(" ", widths[i]-len(col))
+		}
+		fmt.Println(strings.TrimRight(strings.Join(parts, "   "), " "))
+	}
 }
 
 // targetName は引数で指定された名前を返し、省略時はカレントディレクトリの

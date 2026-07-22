@@ -6,9 +6,9 @@ PREFIX ?= /usr/local/bin
 build: tidy
 	go build -o $(BIN) .
 
-# リポジトリ内のビルド成果へ PREFIX からシンボリックリンクする。
-install: build
-	ln -sfn "$(CURDIR)/$(BIN)" "$(PREFIX)/$(BIN)"
+# PREFIX へ直接ビルドして配置する。
+install: tidy
+	go build -o "$(PREFIX)/$(BIN)" .
 
 tidy:
 	go mod tidy
