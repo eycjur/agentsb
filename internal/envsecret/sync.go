@@ -22,47 +22,45 @@ const syncHashFile = "secrets.toml.sha256"
 // Sync はシークレットを sbx global へ登録する。
 // 取得元は config [secrets]（既定: secrets.toml、1password なら op read）。
 // 内容が前回と同じなら set はスキップする（network allow のみ）。
+// 変わっていれば既存の sbx シークレットを全部消してから入れ直す。
 // 戻り値はカスタムシークレットの KEY=placeholder（sbx exec -e 用）。
 func Sync(sandboxName string) ([]string, error) {
 	secrets, label, raw, err := loadSource()
 	if err != nil {
 		return nil, err
 	}
-	if len(secrets) == 0 {
-		runlog.Info("envsecret: %s missing or empty, skipping", label)
-		return nil, nil
-	}
-	env := execEnv(secrets)
-
-	var hosts []string
-	seen := map[string]struct{}{}
-	for _, s := range secrets {
-		if _, ok := builtinByEnv[s.Name]; ok {
-			continue
-		}
-		for _, d := range s.Domains {
-			if _, ok := seen[d]; ok {
-				continue
-			}
-			seen[d] = struct{}{}
-			hosts = append(hosts, d)
-		}
-	}
-	if err := sandbox.AllowNetwork(sandboxName, hosts); err != nil {
-		return nil, fmt.Errorf("policy allow: %w", err)
-	}
-
 	sum := sha256Hex(raw)
 	prev, err := loadSyncHash()
 	if err != nil {
 		return nil, err
 	}
 	if prev == sum {
+		if len(secrets) == 0 {
+			runlog.Info("envsecret: %s missing or empty, skipping", label)
+			return nil, nil
+		}
+		if err := allowSecretHosts(sandboxName, secrets); err != nil {
+			return nil, err
+		}
 		runlog.Info("envsecret: secrets unchanged (%s), skip set", label)
 		fmt.Fprintf(os.Stderr, "agentsb: secrets unchanged; reusing sbx global secrets\n")
-		return env, nil
+		return execEnv(secrets), nil
 	}
 
+	fmt.Fprintf(os.Stderr, "agentsb: secrets changed (%s); replacing sbx secrets\n", label)
+	if _, _, err := removeAllSecrets(); err != nil {
+		return nil, fmt.Errorf("clear existing secrets: %w", err)
+	}
+	if len(secrets) == 0 {
+		if err := saveSyncHash(sum); err != nil {
+			return nil, err
+		}
+		runlog.Info("envsecret: %s empty after replace", label)
+		return nil, nil
+	}
+	if err := allowSecretHosts(sandboxName, secrets); err != nil {
+		return nil, err
+	}
 	fmt.Fprintf(os.Stderr, "agentsb: syncing %d secret(s) to sbx global from %s\n", len(secrets), label)
 	for _, s := range secrets {
 		if svc, ok := builtinByEnv[s.Name]; ok {
@@ -78,7 +76,28 @@ func Sync(sandboxName string) ([]string, error) {
 	if err := saveSyncHash(sum); err != nil {
 		return nil, err
 	}
-	return env, nil
+	return execEnv(secrets), nil
+}
+
+func allowSecretHosts(sandboxName string, secrets []Secret) error {
+	var hosts []string
+	seen := map[string]struct{}{}
+	for _, s := range secrets {
+		if _, ok := builtinByEnv[s.Name]; ok {
+			continue
+		}
+		for _, d := range s.Domains {
+			if _, ok := seen[d]; ok {
+				continue
+			}
+			seen[d] = struct{}{}
+			hosts = append(hosts, d)
+		}
+	}
+	if err := sandbox.AllowNetwork(sandboxName, hosts); err != nil {
+		return fmt.Errorf("policy allow: %w", err)
+	}
+	return nil
 }
 
 func setBuiltin(service, value string) error {

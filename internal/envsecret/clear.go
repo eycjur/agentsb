@@ -14,17 +14,29 @@ import (
 
 // Clear は sbx に登録済みのシークレットをすべて削除し、同期ハッシュも消す。
 func Clear() error {
-	out, err := listSecrets()
+	nSvc, nCustom, err := removeAllSecrets()
 	if err != nil {
+		_ = clearSyncHash()
 		return err
 	}
-	services, customs := parseSecretList(out)
-	if len(services) == 0 && len(customs) == 0 {
+	if err := clearSyncHash(); err != nil {
+		return err
+	}
+	if nSvc == 0 && nCustom == 0 {
 		fmt.Fprintln(os.Stderr, "agentsb: no sbx secrets to remove")
-		_ = clearSyncHash()
 		return nil
 	}
+	fmt.Fprintf(os.Stderr, "agentsb: removed %d service + %d custom secret(s)\n", nSvc, nCustom)
+	return nil
+}
 
+// removeAllSecrets は sbx 上のシークレットをすべて削除する（同期ハッシュは触らない）。
+func removeAllSecrets() (nService, nCustom int, err error) {
+	out, err := listSecrets()
+	if err != nil {
+		return 0, 0, err
+	}
+	services, customs := parseSecretList(out)
 	var errs []string
 	for _, s := range services {
 		args := []string{"secret", "rm", "-f"}
@@ -51,14 +63,10 @@ func Clear() error {
 			errs = append(errs, fmt.Sprintf("rm placeholder %s: %v", c.Placeholder, err))
 		}
 	}
-	if err := clearSyncHash(); err != nil {
-		errs = append(errs, err.Error())
-	}
 	if len(errs) > 0 {
-		return fmt.Errorf("secrets clear finished with errors: %s", strings.Join(errs, "; "))
+		return len(services), len(customs), fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
-	fmt.Fprintf(os.Stderr, "agentsb: removed %d service + %d custom secret(s)\n", len(services), len(customs))
-	return nil
+	return len(services), len(customs), nil
 }
 
 type listedService struct {

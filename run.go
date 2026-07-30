@@ -15,6 +15,7 @@ import (
 	"agentsb/internal/image"
 	"agentsb/internal/runlog"
 	"agentsb/internal/sandbox"
+	"agentsb/internal/sshagent"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -32,6 +33,11 @@ func runRun(_ *cobra.Command, _ []string) error {
 	logConfig(cfg)
 	if err := sandbox.CheckCLI(); err != nil {
 		return err
+	}
+	if cfg.SSH.IdentityAgent != "" {
+		if err := sshagent.EnsureHost(cfg.SSH); err != nil {
+			return fmt.Errorf("ssh agent: %w", err)
+		}
 	}
 
 	cwd, err := os.Getwd()
@@ -112,6 +118,12 @@ func runRun(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("secrets: %w", err)
 	}
 
+	if cfg.SSH.IdentityAgent != "" {
+		if err := sshagent.PrepareSandbox(runName); err != nil {
+			return fmt.Errorf("ssh agent: %w", err)
+		}
+	}
+
 	runlog.Info("exec session herdrAgent=%q command=%v", herdrAgent, command)
 	// 停止からの再開でも shell の apt-get update が再度走るため、セッション前に止める。
 	sandbox.StopShellAptRefresh(runName)
@@ -145,14 +157,19 @@ func logConfig(cfg config.Config) {
 	}
 	if cfg.Dotfiles.Repository == "" {
 		runlog.Info("config dotfiles=disabled (set [dotfiles].repository in %s)", path)
-		return
+	} else {
+		target := cfg.Dotfiles.TargetPath
+		if target == "" {
+			target = "~/dotfiles"
+		}
+		runlog.Info("config dotfiles repository=%s target=%s install=%s",
+			cfg.Dotfiles.Repository, target, cfg.Dotfiles.InstallCommand)
 	}
-	target := cfg.Dotfiles.TargetPath
-	if target == "" {
-		target = "~/dotfiles"
+	if cfg.SSH.IdentityAgent != "" {
+		runlog.Info("config ssh identity_agent=%q", cfg.SSH.IdentityAgent)
+	} else {
+		runlog.Info("config ssh identity_agent=disabled")
 	}
-	runlog.Info("config dotfiles repository=%s target=%s install=%s",
-		cfg.Dotfiles.Repository, target, cfg.Dotfiles.InstallCommand)
 }
 
 // execSession はサンドボックスで `sbx exec` を前面実行し、セッションの終了

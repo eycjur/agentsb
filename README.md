@@ -61,7 +61,7 @@ codex --dangerously-bypass-approvals-and-sandbox
 
 | パス | 役割 |
 |------|------|
-| `~/.config/agentsb/config.toml` | グローバル設定（dotfiles・シークレット取得元など） |
+| `~/.config/agentsb/config.toml` | グローバル設定（dotfiles・SSH agent・シークレット取得元など） |
 | `~/.config/agentsb/secrets.toml` | プロキシ注入するシークレット（`[[secret]]`。1Password 利用時は不要） |
 
 `config.toml` の例:
@@ -72,6 +72,11 @@ repository      = "https://github.com/yourname/dotfiles.git"
 target_path     = "~/dotfiles"
 install_command = "install.sh"
 
+# ホスト SSH agent をサンドボックスで使う（git push 等）
+# OpenSSH の IdentityAgent と同じソケット（1Password など）
+[ssh]
+identity_agent = "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+
 # 省略時は ~/.config/agentsb/secrets.toml
 # [secrets]
 # source = "1password"
@@ -80,11 +85,26 @@ install_command = "install.sh"
 
 `[dotfiles]` を設定すると、サンドボックスの新規作成時にリポジトリを clone し、`target_path` 内で `bash <install_command>` を実行してからシェルを起動します。dotfiles を更新したいときはサンドボックス内で手動 pull するか、`agentsb rm` してサンドボックスを作り直してください。
 
-`[secrets]`については後述。
+### SSH agent 転送
+
+`[ssh].identity_agent` を設定すると、`agentsb run` 時に次を行います。
+
+1. そのパスを `SSH_AUTH_SOCK` に載せる（`~/.ssh/config` の `IdentityAgent` と同じ発想）
+2. ホストでソケットが使え、agent に鍵があることを `ssh-add -l` で確認（無ければエラー）
+3. GitHub SSH 向けに解決した `IP:22` をサンドボックスの network policy へ allow
+4. サンドボックス内で `ssh-add -l` をプローブ（失敗時は警告のみ。セッションは続行）
+
+未設定なら SSH 関連の処理はしません。転送そのものは [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/security/credentials/#ssh-agent) が行います。秘密鍵はサンドボックスへコピーしません。
+
+なお、本設定と同時に、ホスト側でも `SSH_AUTH_SOCK` の設定が必要です。
+
+```bash:~/.zshrc
+export SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+```
 
 ### シークレット（プロキシ注入）
 
-`agentsb run` 時にシークレットを sbx の **global** スコープへ登録し、プロキシ注入します。実値はコンテナに入らず、対象ホストへの通信時だけ差し替わります。内容が前回と同じなら登録をスキップします（`~/.agentsb/secrets.toml.sha256`）。
+`agentsb run` 時にシークレットを sbx の **global** スコープへ登録し、プロキシ注入します。実値はコンテナに入らず、対象ホストへの通信時だけ差し替わります。内容が前回と同じなら登録をスキップし（`~/.agentsb/secrets.toml.sha256`）、変わっていれば既存の sbx シークレットを全部消してから入れ直します。
 
 既定は `~/.config/agentsb/secrets.toml`。`config.toml` で指定すると 1Password（Secure Note）から読み込むこともできます。
 
@@ -102,6 +122,8 @@ domains = ["api.deepl.com", "api-free.deepl.com"]
 ```
 
 [組み込みサービス](https://docs.docker.com/ai/sandboxes/security/credentials/#built-in-services)（OpenAI 等）は `domains` 不要で `secret set -g`、それ以外は `domains` 付きで `set-custom -g` します。コンテナ内が `proxy-managed` / `sbx-cs-…` のままなのは正常です。プロジェクトの `.env` には関与しません。
+
+ソースや `sbx secret` から消しても、**既存サンドボックス内の環境変数（`proxy-managed` / `sbx-cs-…`）は消えません**。消すには `agentsb rm` してサンドボックスを作り直してください。
 
 ## 内部仕様
 
@@ -135,3 +157,7 @@ agentsb が管理するデータ（初回の `agentsb run` で自動生成。手
 [herdr](https://herdr.dev/) の pane 内で実行すると、pane の表示名（例: `claude (agentsb)`）を自動で herdr に報告します。
 
 エージェントの状態（working/blocked/idle）と完了の検出は herdr 自身に任せます。herdr はホストのプロセスツリーからエージェントを識別して画面内容から状態を検出するため、agentsb はセッション（`sbx exec`）プロセスの argv[0] をエージェント名に書き換えて、サンドボックス内のエージェントをホスト側から識別できるようにしています。agentsb は Claude Code 前提で常に `claude` を設定するため、Codex CLI を使った場合は herdr 側の状態表示が不正確になります（対応は別途検討）。herdr 外での実行には影響しません。
+
+## Acknowledgements
+
+The integration with herdr was inspired by [pall8t](https://github.com/TakiTake/pall8t).

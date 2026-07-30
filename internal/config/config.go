@@ -12,6 +12,7 @@ import (
 type Config struct {
 	Dotfiles DotfilesConfig `toml:"dotfiles"`
 	Secrets  SecretsConfig  `toml:"secrets"`
+	SSH      SSHConfig      `toml:"ssh"`
 }
 
 // DotfilesConfig はサンドボックス作成時に適用する dotfiles の設定。
@@ -27,6 +28,15 @@ type DotfilesConfig struct {
 type SecretsConfig struct {
 	Source string `toml:"source"`
 	Ref    string `toml:"ref"`
+}
+
+// SSHConfig はホスト SSH agent の転送準備。
+// identity_agent は OpenSSH の IdentityAgent と同様、agent ソケットのパス
+// （例: 1Password の agent.sock）。非空のとき agentsb run はそれを
+// SSH_AUTH_SOCK に載せ、GitHub SSH の network allow と転送プローブを行う。
+// 転送そのものは sbx が行う（秘密鍵はサンドボックスへコピーしない）。
+type SSHConfig struct {
+	IdentityAgent string `toml:"identity_agent"` // ~ 展開可。空なら SSH 処理をスキップ
 }
 
 // Root はデータディレクトリ ~/.agentsb を返す（home / build / logs など）。
