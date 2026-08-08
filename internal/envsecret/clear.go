@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"agentsb/internal/config"
 	"agentsb/internal/runlog"
 )
 
@@ -105,6 +107,14 @@ func clearSyncHash() error {
 		return err
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	// 一時的に使っていた per-sandbox ハッシュも消す。
+	root, err := config.Root()
+	if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(filepath.Join(root, legacySyncHashDir)); err != nil {
 		return err
 	}
 	return nil

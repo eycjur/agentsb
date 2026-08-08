@@ -39,18 +39,14 @@ type CredentialFile struct {
 	SyncIfNewer bool
 }
 
-// credentialSpecs は同期対象ファイルの一覧。.claude/.credentials.json と
-// .codex/auth.json は、それぞれセッション中にリフレッシュされる OAuth
-// トークンで後勝ちで問題ない。.claude.json（オンボーディングや設定の状態）
-// はホスト側の手動編集を尊重したいため、コンテナ側で更新された場合のみ
-// 書き戻す。claude/codex どちらを使うかはコンテナ内でユーザーが手動起動
-// するまで agentsb 側からは分からないため、両方を常に同期対象にする
-// （ホスト側に存在しないファイルは InjectCredentials 側でスキップされる）。
-// .codex/config.toml は同期対象に含めない
+// credentialSpecs は Claude 認証の同期対象。.credentials.json はセッション中に
+// リフレッシュされる OAuth トークンで後勝ちで問題ない。.claude.json（オンボー
+// ディングや設定の状態）はホスト側の手動編集を尊重したいため、コンテナ側で
+// 更新された場合のみ書き戻す。Codex の auth.json はここには含めず、ホストの
+// ~/.codex/auth.json を InjectCodexAuth で一方通行コピーする。
 var credentialSpecs = []credentialSpec{
 	{relPath: filepath.Join(".claude", ".credentials.json"), syncIfNewer: false},
 	{relPath: ".claude.json", syncIfNewer: true},
-	{relPath: filepath.Join(".codex", "auth.json"), syncIfNewer: false},
 }
 
 // EnsureCredentialFiles はコピー先ディレクトリの存在を保証し、サンドボックス
@@ -76,6 +72,29 @@ func EnsureCredentialFiles() ([]CredentialFile, error) {
 		}
 	}
 	return files, nil
+}
+
+// InjectCodexAuth はホストの ~/.codex/auth.json をサンドボックスへコピーする。
+// 書き戻しはしない（ホスト側が正）。ファイルが無ければ何もしない。
+func InjectCodexAuth(runName string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	hostPath := filepath.Join(homeDir, ".codex", "auth.json")
+	if _, err := os.Stat(hostPath); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("cannot stat %s: %w", hostPath, err)
+	}
+	containerPath := filepath.Join(sandbox.HomeDir, ".codex", "auth.json")
+	if err := sandbox.CopyToSandbox(runName, hostPath, containerPath); err != nil {
+		return fmt.Errorf("cannot inject %s: %w", containerPath, err)
+	}
+	if err := sandbox.ChownAgent(runName, containerPath); err != nil {
+		return fmt.Errorf("cannot fix ownership of %s: %w", containerPath, err)
+	}
+	return nil
 }
 
 // InjectCredentials はサンドボックス作成直後に認証情報ファイルをコピーする。

@@ -1,5 +1,6 @@
 // Package envsecret は secrets.toml を sbx global へプロキシ注入する。
 // 組み込みは secret set -g、それ以外は set-custom -g。内容が同じなら set をスキップする。
+// セッションへは毎回 exec -e で proxy-managed / sbx-cs-… を渡し、既存サンドボックスでも即反映する。
 // 取得元は config.toml の [secrets]（file または 1Password Secure Note）。
 package envsecret
 
@@ -155,11 +156,14 @@ func placeholderFor(env string) string {
 	return b.String()
 }
 
-// execEnv はカスタムシークレット用の KEY=placeholder（sbx exec -e 向け）。
+// execEnv はセッション用の KEY=placeholder（sbx exec -e 向け）。
+// 組み込みは proxy-managed、カスタムは sbx-cs-…。既存サンドボックスでも
+// シークレット追加をセッション開始時に反映するため、毎回渡す。
 func execEnv(secrets []Secret) []string {
 	var out []string
 	for _, s := range secrets {
 		if _, ok := builtinByEnv[s.Name]; ok {
+			out = append(out, s.Name+"=proxy-managed")
 			continue
 		}
 		out = append(out, s.Name+"="+placeholderFor(s.Name))

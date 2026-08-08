@@ -1,5 +1,5 @@
-# Ref: https://hub.docker.com/layers/docker/sandbox-templates/shell/images/sha256-f67952703094538ead6f09d9d6efaf58997719bfe5b7f9021b458f78d09d7cdb
-FROM docker/sandbox-templates:shell
+# Ref: https://hub.docker.com/layers/docker/sandbox-templates/shell-docker/images/sha256-88e4148d65a987a173556f52b3dea0c492f037b572a42f69270a634d8c86f378
+FROM docker/sandbox-templates:shell-docker
 
 ARG YAZI_VERSION=v26.5.6
 
@@ -12,6 +12,7 @@ USER root
 # ca-certificates curl git jq less make nodejs python3 sudo
 #
 # sbx のプロキシは archive.ubuntu.com:80 への dial に失敗することがあるため、HTTPS に切り替える。
+# codexは新しすぎると、`codex_apps`のMCPクライアントが認証エラーになる。
 RUN sed -i \
       -e 's|http://archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' \
       -e 's|http://security.ubuntu.com/ubuntu/|https://security.ubuntu.com/ubuntu/|g' \
@@ -19,7 +20,7 @@ RUN sed -i \
     apt-get update && \
     apt-get install -y --no-install-recommends \
       fzf gh python-is-python3 vim zsh && \
-    npm install -g @anthropic-ai/claude-code @openai/codex hunkdiff && \
+    npm install -g @anthropic-ai/claude-code @openai/codex@~0.144.0 hunkdiff && \
     UV_TOOL_DIR=/usr/local/share/uv/tools UV_TOOL_BIN_DIR=/usr/local/bin \
       uv tool install yazi-bin==26.5.6 && \
     chsh -s /bin/zsh agent && \

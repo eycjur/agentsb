@@ -29,8 +29,8 @@ func main() {
 func execute() int {
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "mirror diagnostic logs to stderr")
 	pruneCmd.Flags().BoolVarP(&pruneYes, "yes", "y", false, "skip confirmation prompt")
-	secretsCmd.AddCommand(secretsClearCmd)
-	rootCmd.AddCommand(runCmd, buildCmd, lsCmd, stopCmd, rmCmd, pruneCmd, openCmd, secretsCmd)
+	secretCmd.AddCommand(secretClearCmd)
+	rootCmd.AddCommand(runCmd, buildCmd, lsCmd, stopCmd, rmCmd, pruneCmd, openCmd, secretCmd)
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
 		runlog.SetVerbose(verboseFlag)
 		runlog.Open()
@@ -192,14 +192,15 @@ var stopCmd = &cobra.Command{
 // pruneYes は prune の -y/--yes。確認プロンプトをスキップする。
 var pruneYes bool
 
-// secretsCmd は agentsb secrets サブコマンド群。
-var secretsCmd = &cobra.Command{
-	Use:   "secrets",
-	Short: "Manage sbx proxy-injected secrets",
+// secretCmd は agentsb secret サブコマンド群。
+var secretCmd = &cobra.Command{
+	Use:     "secret",
+	Aliases: []string{"secrets"},
+	Short:   "Manage sbx proxy-injected secrets",
 }
 
-// secretsClearCmd は sbx に登録済みのシークレットをすべて削除する。
-var secretsClearCmd = &cobra.Command{
+// secretClearCmd は sbx に登録済みのシークレットをすべて削除する。
+var secretClearCmd = &cobra.Command{
 	Use:   "clear",
 	Short: "Remove all sbx secrets (global and sandbox-scoped)",
 	Args:  cobra.NoArgs,

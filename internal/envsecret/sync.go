@@ -18,12 +18,13 @@ import (
 )
 
 const syncHashFile = "secrets.toml.sha256"
+const legacySyncHashDir = "secrets-sync"
 
 // Sync はシークレットを sbx global へ登録する。
 // 取得元は config [secrets]（既定: secrets.toml、1password なら op read）。
 // 内容が前回と同じなら set はスキップする（network allow のみ）。
 // 変わっていれば既存の sbx シークレットを全部消してから入れ直す。
-// 戻り値はカスタムシークレットの KEY=placeholder（sbx exec -e 用）。
+// 戻り値はセッション用の KEY=placeholder（sbx exec -e 用。組み込みは proxy-managed）。
 func Sync(sandboxName string) ([]string, error) {
 	secrets, label, raw, err := loadSource()
 	if err != nil {

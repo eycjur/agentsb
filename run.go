@@ -92,6 +92,12 @@ func runRun(_ *cobra.Command, _ []string) error {
 		}
 	}
 
+	// Codex はホストの ~/.codex/auth.json を正とし、毎回コンテナへコピーする
+	// （書き戻しなし）。無くてもエラーにはしない。
+	if err := home.InjectCodexAuth(runName); err != nil {
+		return fmt.Errorf("cannot inject codex auth: %w", err)
+	}
+
 	// セッションはログインシェル固定。エージェントはシェル内から手動で起動する。
 	// [dotfiles] が設定されていれば、サンドボックスの新規作成時のみ clone/
 	// インストールを済ませてからシェルへ exec する起動スクリプトで包む（詳細は

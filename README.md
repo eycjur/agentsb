@@ -3,7 +3,7 @@
 Claude Code や Codex などを、ディレクトリ単位の microVM サンドボックスで動かす CLI です。
 実行環境は [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/)（`sbx`）です。
 
-ディレクトリごとに 1 つのサンドボックスを持ちます。認証情報（`~/.claude/.credentials.json`、`~/.claude.json`）を、サンドボックス作成時にホストの `~/.agentsb/home` からサンドボックスへコピーします（`sbx cp`）。書き戻しはセッション終了時に行い、`.credentials.json`（OAuth トークン）は無条件で上書き、`.claude.json`（オンボーディング状態や設定）はサンドボックス側で更新された場合だけホストへ反映します（ホスト側の手動編集を古い内容で上書きしないため）。サンドボックスは `agentsb rm` で削除するまで維持されます。
+ディレクトリごとに 1 つのサンドボックスを持ちます。Claude の認証情報（`~/.claude/.credentials.json`、`~/.claude.json`）は、サンドボックス作成時にホストの `~/.agentsb/home` からコピーし（`sbx cp`）、セッション終了時に書き戻します。`.credentials.json`（OAuth トークン）は無条件で上書き、`.claude.json`（オンボーディング状態や設定）はサンドボックス側で更新された場合だけホストへ反映します。Codex の `~/.codex/auth.json` はホスト側を正とし、`agentsb run` のたびにコンテナへコピーするだけで、書き戻しはしません。サンドボックスは `agentsb rm` で削除するまで維持されます。
 
 ## 前提
 
@@ -49,7 +49,7 @@ codex --dangerously-bypass-approvals-and-sandbox
 | `agentsb stop [name]` | サンドボックスを停止（状態は保持され、次の `run` で再開。名前省略時はカレントディレクトリのもの） |
 | `agentsb rm [name]` | サンドボックスを削除（名前省略時はカレントディレクトリのもの。認証情報は他サンドボックスとも共有しているため削除しない） |
 | `agentsb open [port]` | サンドボックスのポートをホストへ公開し（`sbx ports --publish`）、ブラウザで `http://localhost:<port>/` を開く（ポート省略時は 8000） |
-| `agentsb secrets clear` | sbx に登録済みのシークレットをすべて削除する（同期ハッシュもクリア。次回 `run` で再登録） |
+| `agentsb secret clear` | sbx に登録済みのシークレットをすべて削除する（同期ハッシュもクリア。次回 `run` で再登録） |
 
 `agentsb build` はテンプレートだけを対象にした操作で、既存サンドボックスの状態には影響しません。`agentsb prune` は管理下の全サンドボックスを状態に関わらず削除し、テンプレートと認証情報（sbx secrets 含む）も含めて全消去します。
 
@@ -106,6 +106,8 @@ export SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/
 
 `agentsb run` 時にシークレットを sbx の **global** スコープへ登録し、プロキシ注入します。実値はコンテナに入らず、対象ホストへの通信時だけ差し替わります。内容が前回と同じなら登録をスキップし（`~/.agentsb/secrets.toml.sha256`）、変わっていれば既存の sbx シークレットを全部消してから入れ直します。
 
+環境変数は毎回 `sbx exec -e` で渡すため（組み込みは `proxy-managed`、カスタムは `sbx-cs-…`）、`secrets.toml` の追加・変更は次回の `agentsb run` から反映されます。サンドボックスの作り直しは不要です。
+
 既定は `~/.config/agentsb/secrets.toml`。`config.toml` で指定すると 1Password（Secure Note）から読み込むこともできます。
 
 シークレット本体（ローカルファイル / 1Password 共通）の形:
@@ -122,8 +124,6 @@ domains = ["api.deepl.com", "api-free.deepl.com"]
 ```
 
 [組み込みサービス](https://docs.docker.com/ai/sandboxes/security/credentials/#built-in-services)（OpenAI 等）は `domains` 不要で `secret set -g`、それ以外は `domains` 付きで `set-custom -g` します。コンテナ内が `proxy-managed` / `sbx-cs-…` のままなのは正常です。プロジェクトの `.env` には関与しません。
-
-ソースや `sbx secret` から消しても、**既存サンドボックス内の環境変数（`proxy-managed` / `sbx-cs-…`）は消えません**。消すには `agentsb rm` してサンドボックスを作り直してください。
 
 ## 内部仕様
 
@@ -144,13 +144,13 @@ agentsb が管理するデータ（初回の `agentsb run` で自動生成。手
 | パス | 役割 |
 |------|------|
 | `~/.agentsb/build/` | テンプレートビルド用の作業ディレクトリ。ビルド時に Containerfile と tar がここへ書き出される |
-| `~/.agentsb/home/` | 認証情報（`.claude/.credentials.json`、`.claude.json`、`.codex/auth.json`）を永続化し、サンドボックス作成時・セッション終了時に `sbx cp` でやり取りする |
+| `~/.agentsb/home/` | Claude 認証情報（`.claude/.credentials.json`、`.claude.json`）を永続化し、サンドボックス作成時・セッション終了時に `sbx cp` でやり取りする（Codex の auth はホストの `~/.codex/auth.json` から都度コピー） |
 | `~/.agentsb/logs/agentsb.log` | 動作検証用ログ（設定の有無、sbx CLI 呼び出し、dotfiles の有効/無効など） |
 | `~/.agentsb/secrets.toml.sha256` | シークレット同期スキップ判定用のハッシュ |
 
 ログは常に追記され、2 MiB 超で `agentsb.log.1` へローテートします。ターミナルにも同じ行を出したいときは `-v` / `--verbose` を付けてください。dotfiles の clone/install の途中経過はサンドボックス内の stderr（セッション画面）にも出ます。
 
-初回はサンドボックス内でエージェントのログインを一度だけ済ませてください。認証情報はセッション終了時に `~/.agentsb/home` へコピーバックされるため、テンプレートを作り直しても維持されます。
+Claude は初回だけサンドボックス内でログインしてください（セッション終了時に `~/.agentsb/home` へ書き戻されます）。Codex はホストでログイン済みの `~/.codex/auth.json` を使います。
 
 ### herdr 連携
 
