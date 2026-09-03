@@ -150,41 +150,61 @@ func printTable(table [][]string) {
 	}
 }
 
-// targetName は引数で指定された名前を返し、省略時はカレントディレクトリの
-// サンドボックス名を返す。`agentsb-` プレフィックスは省略できる。
-func targetName(args []string) (string, error) {
-	if len(args) == 1 {
-		name := args[0]
+// targetNames は引数で指定された名前群を返し、省略時はカレントディレクトリの
+// サンドボックス名を1件返す。各名前の `agentsb-` プレフィックスは省略できる。
+func targetNames(args []string) ([]string, error) {
+	if len(args) == 0 {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("cannot get working directory: %w", err)
+		}
+		return []string{sandbox.RunName(cwd)}, nil
+	}
+	names := make([]string, len(args))
+	for i, name := range args {
 		if !strings.HasPrefix(name, sandbox.NamePrefix) {
 			name = sandbox.NamePrefix + name
 		}
-		return name, nil
+		names[i] = name
 	}
-	cwd, err := os.Getwd()
+	return names, nil
+}
+
+// targetName は targetNames の単一名版。
+func targetName(args []string) (string, error) {
+	names, err := targetNames(args)
 	if err != nil {
-		return "", fmt.Errorf("cannot get working directory: %w", err)
+		return "", err
 	}
-	return sandbox.RunName(cwd), nil
+	return names[0], nil
 }
 
 // stopCmd は agentsb stop コマンド。サンドボックスを停止する。
 // サンドボックスと home は残るため、次の run で同じ状態から再開できる。
+// 複数名を指定すると順に停止する。1件の失敗で残りの停止を止めないため、
+// エラーはまとめて末尾で報告する（prune と同じ方針）。
 var stopCmd = &cobra.Command{
-	Use:   "stop [name]",
-	Short: "Stop a running sandbox (state is kept; the next run resumes it; defaults to the current directory's)",
-	Args:  cobra.MaximumNArgs(1),
+	Use:   "stop [name...]",
+	Short: "Stop one or more running sandboxes (state is kept; the next run resumes it; defaults to the current directory's)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := sandbox.CheckCLI(); err != nil {
 			return err
 		}
-		name, err := targetName(args)
+		names, err := targetNames(args)
 		if err != nil {
 			return err
 		}
-		if err := sandbox.Stop(name); err != nil {
-			return fmt.Errorf("stop %s: %w", name, err)
+		var errs []string
+		for _, name := range names {
+			if err := sandbox.Stop(name); err != nil {
+				errs = append(errs, fmt.Sprintf("stop %s: %v", name, err))
+				continue
+			}
+			fmt.Printf("stopped %s\n", name)
 		}
-		fmt.Printf("stopped %s\n", name)
+		if len(errs) > 0 {
+			return fmt.Errorf("stop finished with errors: %s", strings.Join(errs, "; "))
+		}
 		return nil
 	},
 }
@@ -319,31 +339,41 @@ var openCmd = &cobra.Command{
 // rmCmd は agentsb rm コマンド。サンドボックスを削除する（稼働中でも
 // `sbx rm --force` で停止込みで消える）。認証情報は `~/.agentsb/home` に
 // 別途永続化されており、他のサンドボックスとも共有しているため、ここでは
-// 削除しない。名前を省略するとカレントディレクトリのサンドボックスを対象にする。
+// 削除しない。名前を省略するとカレントディレクトリのサンドボックスを対象に
+// する。複数名を指定すると順に削除する。1件の失敗で残りの削除を止めないため、
+// エラーはまとめて末尾で報告する（prune と同じ方針）。
 var rmCmd = &cobra.Command{
-	Use:     "rm [name]",
+	Use:     "rm [name...]",
 	Aliases: []string{"delete", "remove"},
-	Short:   "Remove a sandbox (defaults to the current directory's)",
-	Args:    cobra.MaximumNArgs(1),
+	Short:   "Remove one or more sandboxes (defaults to the current directory's)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := sandbox.CheckCLI(); err != nil {
 			return err
 		}
-		name, err := targetName(args)
+		names, err := targetNames(args)
 		if err != nil {
 			return err
 		}
-		exists, err := sandbox.Has(name)
-		if err != nil {
-			return err
+		var errs []string
+		for _, name := range names {
+			exists, err := sandbox.Has(name)
+			if err != nil {
+				errs = append(errs, err.Error())
+				continue
+			}
+			if !exists {
+				errs = append(errs, fmt.Sprintf("no sandbox named %s", name))
+				continue
+			}
+			if err := sandbox.Remove(name); err != nil {
+				errs = append(errs, fmt.Sprintf("remove %s: %v", name, err))
+				continue
+			}
+			fmt.Printf("removed %s\n", name)
 		}
-		if !exists {
-			return fmt.Errorf("no sandbox named %s", name)
+		if len(errs) > 0 {
+			return fmt.Errorf("rm finished with errors: %s", strings.Join(errs, "; "))
 		}
-		if err := sandbox.Remove(name); err != nil {
-			return err
-		}
-		fmt.Printf("removed %s\n", name)
 		return nil
 	},
 }

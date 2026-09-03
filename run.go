@@ -99,12 +99,12 @@ func runRun(_ *cobra.Command, _ []string) error {
 	}
 
 	// セッションはログインシェル固定。エージェントはシェル内から手動で起動する。
-	// [dotfiles] が設定されていれば、サンドボックスの新規作成時のみ clone/
-	// インストールを済ませてからシェルへ exec する起動スクリプトで包む（詳細は
-	// internal/dotfiles）。既存サンドボックスへ入るだけの場合は、毎回の
-	// clone/pull が冗長なためスキップする
+	// [dotfiles] が設定されていれば、clone とインストールを済ませてから
+	// シェルへ exec する起動スクリプトで包む（詳細は internal/dotfiles）。
+	// セットアップが走るのは dotfiles がまだ無いときだけで、stop からの復帰でも
+	// 稼働中のサンドボックスへの再入室でも何もしない。
 	command := []string{"zsh", "-l"}
-	if created && cfg.Dotfiles.Repository != "" {
+	if cfg.Dotfiles.Repository != "" {
 		command = dotfiles.Command(
 			cfg.Dotfiles.Repository,
 			cfg.Dotfiles.TargetPath,
@@ -112,8 +112,6 @@ func runRun(_ *cobra.Command, _ []string) error {
 			command,
 		)
 		runlog.Info("session will bootstrap dotfiles then exec zsh -l")
-	} else if cfg.Dotfiles.Repository != "" {
-		runlog.Info("session command: zsh -l (dotfiles bootstrap skipped: sandbox already exists)")
 	} else {
 		runlog.Info("session command: zsh -l (dotfiles disabled)")
 	}

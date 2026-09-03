@@ -73,7 +73,7 @@ func Open() {
 	}
 	file = f
 	path = p
-	writeLocked("info", "log opened path=%s verbose=%v", p, verbose)
+	writeLocked("info", false, "log opened path=%s verbose=%v", p, verbose)
 }
 
 // Close はログファイルを閉じる。
@@ -90,23 +90,31 @@ func Close() {
 func Info(format string, args ...any) {
 	mu.Lock()
 	defer mu.Unlock()
-	writeLocked("info", format, args...)
+	writeLocked("info", false, format, args...)
 }
 
 // Warn は警告をログに書く。ユーザー向け表示は呼び出し側の stderr に任せる。
 func Warn(format string, args ...any) {
 	mu.Lock()
 	defer mu.Unlock()
-	writeLocked("warn", format, args...)
+	writeLocked("warn", false, format, args...)
 }
 
-func writeLocked(level, format string, args ...any) {
+// Notice は認証情報のコピーなど、ユーザーが常に把握できるべき操作を書く。
+// verbose 設定によらず常に stderr にも出す点が Info と異なる。
+func Notice(format string, args ...any) {
+	mu.Lock()
+	defer mu.Unlock()
+	writeLocked("info", true, format, args...)
+}
+
+func writeLocked(level string, alwaysShow bool, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	line := fmt.Sprintf("%s %s %s\n", time.Now().Format(timeLayout), level, msg)
 	if file != nil {
 		_, _ = file.WriteString(line)
 	}
-	if verbose {
+	if verbose || alwaysShow {
 		fmt.Fprint(os.Stderr, "agentsb: ", msg, "\n")
 	}
 }

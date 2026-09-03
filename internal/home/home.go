@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"agentsb/internal/config"
+	"agentsb/internal/runlog"
 	"agentsb/internal/sandbox"
 )
 
@@ -83,6 +84,7 @@ func InjectCodexAuth(runName string) error {
 	}
 	hostPath := filepath.Join(homeDir, ".codex", "auth.json")
 	if _, err := os.Stat(hostPath); os.IsNotExist(err) {
+		runlog.Notice("codex auth: skip %s (host file not found)", hostPath)
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("cannot stat %s: %w", hostPath, err)
@@ -94,6 +96,7 @@ func InjectCodexAuth(runName string) error {
 	if err := sandbox.ChownAgent(runName, containerPath); err != nil {
 		return fmt.Errorf("cannot fix ownership of %s: %w", containerPath, err)
 	}
+	runlog.Notice("codex auth: copied %s -> sandbox:%s", hostPath, containerPath)
 	return nil
 }
 
@@ -110,6 +113,7 @@ func InjectCredentials(runName string, files []CredentialFile) error {
 	for _, f := range files {
 		hostInfo, err := os.Stat(f.HostPath)
 		if os.IsNotExist(err) {
+			runlog.Notice("claude credentials: skip %s (host file not found)", f.HostPath)
 			continue
 		} else if err != nil {
 			return fmt.Errorf("cannot stat %s: %w", f.HostPath, err)
@@ -125,6 +129,7 @@ func InjectCredentials(runName string, files []CredentialFile) error {
 				return fmt.Errorf("cannot align mtime of %s: %w", f.ContainerPath, err)
 			}
 		}
+		runlog.Notice("claude credentials: copied %s -> sandbox:%s", f.HostPath, f.ContainerPath)
 	}
 	return nil
 }
@@ -151,6 +156,7 @@ func extractOne(runName string, f CredentialFile) error {
 		return fmt.Errorf("cannot check %s: %w", f.ContainerPath, err)
 	}
 	if !exists {
+		runlog.Notice("claude credentials: skip sandbox:%s (not found in sandbox)", f.ContainerPath)
 		return nil
 	}
 
@@ -160,6 +166,7 @@ func extractOne(runName string, f CredentialFile) error {
 			return err
 		}
 		if !newer {
+			runlog.Notice("claude credentials: skip sandbox:%s -> %s (host copy is not older)", f.ContainerPath, f.HostPath)
 			return nil
 		}
 	}
@@ -178,7 +185,11 @@ func extractOne(runName string, f CredentialFile) error {
 	if err := os.Chmod(tmp, 0600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, f.HostPath)
+	if err := os.Rename(tmp, f.HostPath); err != nil {
+		return err
+	}
+	runlog.Notice("claude credentials: copied sandbox:%s -> %s", f.ContainerPath, f.HostPath)
+	return nil
 }
 
 // containerFileIsNewer はコンテナ側ファイルの mtime がホスト側より新しいかを

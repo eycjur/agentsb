@@ -83,7 +83,7 @@ identity_agent = "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.so
 # ref    = "op://Personal/agentsb-secrets/notesPlain"
 ```
 
-`[dotfiles]` を設定すると、サンドボックスの新規作成時にリポジトリを clone し、`target_path` 内で `bash <install_command>` を実行してからシェルを起動します。dotfiles を更新したいときはサンドボックス内で手動 pull するか、`agentsb rm` してサンドボックスを作り直してください。
+`[dotfiles]` を設定すると、リポジトリを clone し、`target_path` 内で `bash <install_command>` を実行してからシェルを起動します。実行されるのは `target_path` に dotfiles がまだ無いときだけ（実質サンドボックスの新規作成時）で、`agentsb stop` からの復帰でも稼働中のサンドボックスへの再入室でも何もしません。dotfiles の更新を反映したいときは、サンドボックス内で手動 pull するか、`agentsb rm` してから再度 `agentsb run` してください。
 
 ### SSH agent 転送
 

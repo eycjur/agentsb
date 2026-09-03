@@ -1,4 +1,4 @@
-// Package dotfiles は、コンテナ起動時に dotfiles リポジトリを clone/更新して
+// Package dotfiles は、コンテナ起動時に dotfiles リポジトリを clone して
 // インストールスクリプトを実行してから、本来のコマンドへ exec で引き継ぐ
 // 起動コマンドを組み立てる。イメージビルド時ではなく起動時に行うのは、
 // /home/agent が run ごとにマウントで差し替えられ、ビルド時に home へ
@@ -19,6 +19,11 @@ func Command(repo, targetPath, installCmd string, command []string) []string {
 // script は $1=repository $2=target_path $3=install_command、$4 以降を
 // 本来のコマンドとして受け取る。各段階を stderr に出し、検証しやすくする。
 // clone/install の失敗は警告のみで、コマンドはそのまま起動する。
+//
+// セットアップを行うのは dotfiles がまだ無いときだけ（clone → install）。
+// サンドボックスのファイルシステムは `agentsb stop` では消えないため、
+// stop からの復帰でも再入室でも何もしない。dotfiles を更新したいときは
+// サンドボックス内で手動 pull するか、`agentsb rm` して作り直す。
 const script = `
 repo=$1; target=$2; install=$3; shift 3
 
@@ -31,26 +36,22 @@ case "$target" in
   *)     dir=$target ;;
 esac
 
+if [ -d "$dir/.git" ]; then
+  log "already cloned in $dir, skipping"
+  exec "$@"
+fi
+
 log "repository=$repo"
 log "target=$dir"
 log "install_command=$install"
 
-if [ -d "$dir/.git" ]; then
-  log "pulling existing clone"
-  if git -C "$dir" pull --ff-only --quiet; then
-    log "pull ok"
-  else
-    log "pull failed (offline?), using cached version"
-  fi
+log "cloning into $dir"
+if git clone --depth=1 --quiet "$repo" "$dir"; then
+  log "clone ok"
 else
-  log "cloning into $dir"
-  if git clone --depth=1 --quiet "$repo" "$dir"; then
-    log "clone ok"
-  else
-    log "clone failed, skipping install"
-    log "exec: $*"
-    exec "$@"
-  fi
+  log "clone failed, skipping install"
+  log "exec: $*"
+  exec "$@"
 fi
 
 if [ -z "$install" ]; then
