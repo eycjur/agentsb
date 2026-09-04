@@ -21,7 +21,7 @@ RUN sed -i \
     apt-get install -y --no-install-recommends \
       fzf gh python-is-python3 vim zsh && \
     curl https://mise.run | sh && \
-    npm install -g @anthropic-ai/claude-code @openai/codex@~0.144.0 hunkdiff && \
+    npm install -g @anthropic-ai/claude-code @openai/codex hunkdiff && \
     UV_TOOL_DIR=/usr/local/share/uv/tools UV_TOOL_BIN_DIR=/usr/local/bin \
       uv tool install yazi-bin==26.5.6 && \
     chsh -s /bin/zsh agent && \
