@@ -41,6 +41,8 @@ claude --dangerously-skip-permissions
 codex --dangerously-bypass-approvals-and-sandbox
 ```
 
+CLI ツール（`claude` / `codex` / `hunkdiff`）は `/usr/local/share/npm-global` に入ります。サンドボックス内での更新は `npm install -g @openai/codex` のように **sudo なし**で行ってください（`sudo npm` は別の prefix を触ります）。テンプレートへ恒久反映する場合は Containerfile を編集して `sudo make install` → `agentsb build` → 対象ディレクトリで `agentsb rm` → `agentsb run` です。
+
 | コマンド | 説明 |
 |----------|------|
 | `agentsb ls` | サンドボックスの一覧（停止中も含む。NAME は完全名から `agentsb-` を除いたもの、SBX NAME は sbx 上の完全名） |

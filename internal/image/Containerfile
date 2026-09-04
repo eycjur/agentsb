@@ -1,7 +1,7 @@
 # Ref: https://hub.docker.com/layers/docker/sandbox-templates/shell-docker/images/sha256-88e4148d65a987a173556f52b3dea0c492f037b572a42f69270a634d8c86f378
 FROM docker/sandbox-templates:shell-docker
 
-ARG YAZI_VERSION=v26.5.6
+ARG YAZI_VERSION=26.5.6
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV IS_SANDBOX=1
@@ -12,7 +12,6 @@ USER root
 # ca-certificates curl git jq less make nodejs python3 sudo
 #
 # sbx のプロキシは archive.ubuntu.com:80 への dial に失敗することがあるため、HTTPS に切り替える。
-# codexは新しすぎると、`codex_apps`のMCPクライアントが認証エラーになる。
 RUN sed -i \
       -e 's|http://archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' \
       -e 's|http://security.ubuntu.com/ubuntu/|https://security.ubuntu.com/ubuntu/|g' \
@@ -21,15 +20,13 @@ RUN sed -i \
     apt-get install -y --no-install-recommends \
       fzf gh python-is-python3 vim zsh && \
     curl https://mise.run | sh && \
-    npm install -g @anthropic-ai/claude-code @openai/codex hunkdiff && \
     UV_TOOL_DIR=/usr/local/share/uv/tools UV_TOOL_BIN_DIR=/usr/local/bin \
-      uv tool install yazi-bin==26.5.6 && \
+      uv tool install yazi-bin==${YAZI_VERSION} && \
     chsh -s /bin/zsh agent && \
     rm -rf /var/lib/apt/lists/*
 
+USER agent
 # 認証情報ファイルは `sbx cp` でサンドボックス作成後にコピーする
 # （internal/home 参照）。コピー先の親ディレクトリだけ先に用意しておく。
-RUN mkdir -p /home/agent/.claude /home/agent/.codex && \
-    chown -R agent:agent /home/agent/.claude /home/agent/.codex
-
-USER agent
+RUN npm install -g @anthropic-ai/claude-code @openai/codex hunkdiff && \
+    mkdir -p /home/agent/.claude /home/agent/.codex
