@@ -41,25 +41,18 @@ func removeAllSecrets() (nService, nCustom int, err error) {
 	services, customs := parseSecretList(out)
 	var errs []string
 	for _, s := range services {
-		args := []string{"secret", "rm", "-f"}
-		logged := []string{"secret", "rm", "-f"}
-		if s.Global {
-			args = append(args, "-g", s.Name)
-			logged = append(logged, "-g", s.Name)
-		} else {
-			args = append(args, s.Scope, s.Name)
-			logged = append(logged, s.Scope, s.Name)
+		args := []string{"secret", "rm", "-f", s.Name}
+		if !s.Global {
+			args = append(args, "--sandbox", s.Scope)
 		}
-		if err := runSbx(args, logged); err != nil {
-			errs = append(errs, fmt.Sprintf("rm %s: %v", strings.Join(logged, " "), err))
+		if err := runSbx(args, args); err != nil {
+			errs = append(errs, fmt.Sprintf("rm %s: %v", strings.Join(args, " "), err))
 		}
 	}
 	for _, c := range customs {
-		var args []string
-		if c.Global {
-			args = []string{"secret", "rm", "-g", "-f", "--placeholder", c.Placeholder}
-		} else {
-			args = []string{"secret", "rm", c.Scope, "-f", "--placeholder", c.Placeholder}
+		args := []string{"secret", "rm", "-f", "--placeholder", c.Placeholder}
+		if !c.Global {
+			args = append(args, "--sandbox", c.Scope)
 		}
 		if err := runSbx(args, args); err != nil {
 			errs = append(errs, fmt.Sprintf("rm placeholder %s: %v", c.Placeholder, err))

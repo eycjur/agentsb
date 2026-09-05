@@ -1,6 +1,8 @@
 // Package envsecret は secrets.toml を sbx global へプロキシ注入する。
-// 組み込みは secret set -g、それ以外は set-custom -g。内容が同じなら set をスキップする。
-// セッションへは毎回 exec -e で proxy-managed / sbx-cs-… を渡し、既存サンドボックスでも即反映する。
+// 組み込みは secret set、それ以外は set-custom。内容が同じなら set をスキップする。
+// sbx は global シークレットをサンドボックス作成時にしか取り込まないため、
+// 登録はサンドボックス作成前に行い、変更後は作り直しが必要になる。
+// セッションへは exec -e で proxy-managed / sbx-cs-… を渡す。
 // 取得元は config.toml の [secrets]（file または 1Password Secure Note）。
 package envsecret
 
@@ -19,7 +21,7 @@ import (
 
 const fileName = "secrets.toml"
 
-// builtinByEnv は sbx 組み込みサービス名。set-custom ではなく secret set -g で登録する。
+// builtinByEnv は sbx 組み込みサービス名。set-custom ではなく secret set で登録する。
 var builtinByEnv = map[string]string{
 	"OPENAI_API_KEY":     "openai",
 	"ANTHROPIC_API_KEY":  "anthropic",
@@ -156,10 +158,9 @@ func placeholderFor(env string) string {
 	return b.String()
 }
 
-// execEnv はセッション用の KEY=placeholder（sbx exec -e 向け）。
-// 組み込みは proxy-managed、カスタムは sbx-cs-…。既存サンドボックスでも
-// シークレット追加をセッション開始時に反映するため、毎回渡す。
-func execEnv(secrets []Secret) []string {
+// ExecEnv はセッション用の KEY=placeholder（sbx exec -e 向け）。
+// 組み込みは proxy-managed、カスタムは sbx-cs-…。
+func ExecEnv(secrets []Secret) []string {
 	var out []string
 	for _, s := range secrets {
 		if _, ok := builtinByEnv[s.Name]; ok {

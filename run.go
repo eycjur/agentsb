@@ -69,6 +69,13 @@ func runRun(_ *cobra.Command, _ []string) error {
 	}
 	runlog.Info("sandbox %s exists=%v", runName, exists)
 
+	// シークレットは sbx global へ登録する。sbx は global シークレットをサンドボックス
+	// 作成時にしか取り込まないため、作成より前に同期しておく（実値はコンテナに入れない）。
+	secrets, err := envsecret.Sync()
+	if err != nil {
+		return fmt.Errorf("secrets: %w", err)
+	}
+
 	// 既存のサンドボックスがあれば、テンプレート定義が変わっていてもそのまま
 	// 使い続ける（作り直すと apt install などサンドボックス内の変更が消えるため）。
 
@@ -98,6 +105,12 @@ func runRun(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("cannot inject codex auth: %w", err)
 	}
 
+	// カスタムシークレットの対象ホストは allow されていないとプロキシが置換できない。
+	// policy はサンドボックス単位なので作成後に付ける。
+	if err := sandbox.AllowNetwork(runName, envsecret.Hosts(secrets)); err != nil {
+		return fmt.Errorf("secrets: policy allow: %w", err)
+	}
+
 	// セッションはログインシェル固定。エージェントはシェル内から手動で起動する。
 	// [dotfiles] が設定されていれば、clone とインストールを済ませてから
 	// シェルへ exec する起動スクリプトで包む（詳細は internal/dotfiles）。
@@ -116,11 +129,7 @@ func runRun(_ *cobra.Command, _ []string) error {
 		runlog.Info("session command: zsh -l (dotfiles disabled)")
 	}
 
-	// ~/.config/agentsb/secrets.toml の [[secret]] をプロキシ注入（実値はコンテナに入れない）
-	secretEnv, err := envsecret.Sync(runName)
-	if err != nil {
-		return fmt.Errorf("secrets: %w", err)
-	}
+	secretEnv := envsecret.ExecEnv(secrets)
 
 	if cfg.SSH.IdentityAgent != "" {
 		if err := sshagent.PrepareSandbox(runName); err != nil {

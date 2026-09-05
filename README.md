@@ -7,7 +7,7 @@ Claude Code や Codex などを、ディレクトリ単位の microVM サンド�
 
 ## 前提
 
-- [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/get-started/)（`sbx` CLI）: `brew install docker/tap/sbx`
+- [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/get-started/)（`sbx` CLI、0.39 以降。`secret` サブコマンドの引数形式に依存）: `brew install docker/tap/sbx`
 - `docker` CLI（テンプレートイメージのビルド時のみ使用）
 - ビルドに Go 1.22 以降
 
@@ -106,9 +106,9 @@ export SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/
 
 ### シークレット（プロキシ注入）
 
-`agentsb run` 時にシークレットを sbx の **global** スコープへ登録し、プロキシ注入します。実値はコンテナに入らず、対象ホストへの通信時だけ差し替わります。内容が前回と同じなら登録をスキップし（`~/.agentsb/secrets.toml.sha256`）、変わっていれば既存の sbx シークレットを全部消してから入れ直します。
+`agentsb run` はサンドボックスを作る前にシークレットを sbx の **global** スコープへ登録し、プロキシ注入します。実値は stdin で sbx に渡し、コマンド引数やログには出しません。コンテナには代替値だけを渡します。内容が前回と同じなら登録をスキップし（`~/.agentsb/secrets.toml.sha256`）、変わっていれば既存の sbx シークレットを全部消してから入れ直します。
 
-環境変数は毎回 `sbx exec -e` で渡すため（組み込みは `proxy-managed`、カスタムは `sbx-cs-…`）、`secrets.toml` の追加・変更は次回の `agentsb run` から反映されます。サンドボックスの作り直しは不要です。
+sbx のプロキシは global シークレットをサンドボックス作成時に取り込むため、設定の追加・変更・削除を既存のサンドボックスに反映するには `agentsb rm` → `agentsb run` で作り直す必要があります（sbx の仕様。作り直すと apt install などサンドボックス内の変更は消えます）。
 
 既定は `~/.config/agentsb/secrets.toml`。`config.toml` で指定すると 1Password（Secure Note）から読み込むこともできます。
 
@@ -125,7 +125,7 @@ value = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx"
 domains = ["api.deepl.com", "api-free.deepl.com"]
 ```
 
-[組み込みサービス](https://docs.docker.com/ai/sandboxes/security/credentials/#built-in-services)（OpenAI 等）は `domains` 不要で `secret set -g`、それ以外は `domains` 付きで `set-custom -g` します。コンテナ内が `proxy-managed` / `sbx-cs-…` のままなのは正常です。プロジェクトの `.env` には関与しません。
+[組み込みサービス](https://docs.docker.com/ai/sandboxes/security/credentials/#built-in-services)（OpenAI 等）は `domains` 不要で `secret set`、それ以外は `domains` 付きで `set-custom` します。コンテナ内が `proxy-managed` / `sbx-cs-…` のままなのは正常です。プロジェクトの `.env` には関与しません。
 
 ## 内部仕様
 

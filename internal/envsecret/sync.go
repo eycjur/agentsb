@@ -14,18 +14,18 @@ import (
 
 	"agentsb/internal/config"
 	"agentsb/internal/runlog"
-	"agentsb/internal/sandbox"
 )
 
 const syncHashFile = "secrets.toml.sha256"
 const legacySyncHashDir = "secrets-sync"
 
-// Sync はシークレットを sbx global へ登録する。
+// Sync はシークレットを sbx global へ登録し、登録済みのシークレット一覧を返す。
 // 取得元は config [secrets]（既定: secrets.toml、1password なら op read）。
-// 内容が前回と同じなら set はスキップする（network allow のみ）。
+// 内容が前回と同じなら set はスキップする。
 // 変わっていれば既存の sbx シークレットを全部消してから入れ直す。
-// 戻り値はセッション用の KEY=placeholder（sbx exec -e 用。組み込みは proxy-managed）。
-func Sync(sandboxName string) ([]string, error) {
+// global シークレットは sbx がサンドボックス作成時に取り込むため、
+// 必ず sandbox.Create より前に呼ぶこと。
+func Sync() ([]Secret, error) {
 	secrets, label, raw, err := loadSource()
 	if err != nil {
 		return nil, err
@@ -40,12 +40,9 @@ func Sync(sandboxName string) ([]string, error) {
 			runlog.Info("envsecret: %s missing or empty, skipping", label)
 			return nil, nil
 		}
-		if err := allowSecretHosts(sandboxName, secrets); err != nil {
-			return nil, err
-		}
 		runlog.Info("envsecret: secrets unchanged (%s), skip set", label)
 		fmt.Fprintf(os.Stderr, "agentsb: secrets unchanged; reusing sbx global secrets\n")
-		return execEnv(secrets), nil
+		return secrets, nil
 	}
 
 	fmt.Fprintf(os.Stderr, "agentsb: secrets changed (%s); replacing sbx secrets\n", label)
@@ -58,9 +55,6 @@ func Sync(sandboxName string) ([]string, error) {
 		}
 		runlog.Info("envsecret: %s empty after replace", label)
 		return nil, nil
-	}
-	if err := allowSecretHosts(sandboxName, secrets); err != nil {
-		return nil, err
 	}
 	fmt.Fprintf(os.Stderr, "agentsb: syncing %d secret(s) to sbx global from %s\n", len(secrets), label)
 	for _, s := range secrets {
@@ -77,10 +71,13 @@ func Sync(sandboxName string) ([]string, error) {
 	if err := saveSyncHash(sum); err != nil {
 		return nil, err
 	}
-	return execEnv(secrets), nil
+	return secrets, nil
 }
 
-func allowSecretHosts(sandboxName string, secrets []Secret) error {
+// Hosts はカスタムシークレットの対象ドメイン（重複除去済み）を返す。
+// プロキシは対象ホストへの通信が allow されていないと置換できないため、
+// サンドボックス作成後に sandbox.AllowNetwork へ渡す。
+func Hosts(secrets []Secret) []string {
 	var hosts []string
 	seen := map[string]struct{}{}
 	for _, s := range secrets {
@@ -95,28 +92,34 @@ func allowSecretHosts(sandboxName string, secrets []Secret) error {
 			hosts = append(hosts, d)
 		}
 	}
-	if err := sandbox.AllowNetwork(sandboxName, hosts); err != nil {
-		return fmt.Errorf("policy allow: %w", err)
-	}
-	return nil
+	return hosts
 }
 
 func setBuiltin(service, value string) error {
-	return runSbx(
-		[]string{"secret", "set", "-g", service, "--token", value, "--force"},
-		[]string{"secret", "set", "-g", service, "--token", "***", "--force"},
-	)
+	return runSbxInput([]string{"secret", "set", service, "-f"}, value)
 }
 
 func setCustom(s Secret) error {
-	ph := placeholderFor(s.Name)
-	args := []string{"secret", "set-custom", "-g", "--env", s.Name, "--value", s.Value, "--placeholder", ph}
-	logged := []string{"secret", "set-custom", "-g", "--env", s.Name, "--value", "***", "--placeholder", ph}
+	args := []string{"secret", "set-custom", "--env", s.Name, "--placeholder", placeholderFor(s.Name)}
 	for _, h := range s.Domains {
 		args = append(args, "--host", h)
-		logged = append(logged, "--host", h)
 	}
-	return runSbx(args, logged)
+	return runSbxInput(args, s.Value)
+}
+
+// runSbxInput は値を stdin で渡す（引数やログに実値を出さない）。
+func runSbxInput(args []string, value string) error {
+	runlog.Info("sbx %s", strings.Join(args, " "))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sbx", args...)
+	cmd.Stdin = strings.NewReader(value + "\n")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		detail := strings.ReplaceAll(strings.TrimSpace(string(out)), value, "***")
+		return fmt.Errorf("%w: %s", err, detail)
+	}
+	return nil
 }
 
 func runSbx(args, logArgs []string) error {
