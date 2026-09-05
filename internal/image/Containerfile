@@ -26,7 +26,10 @@ RUN sed -i \
     rm -rf /var/lib/apt/lists/*
 
 USER agent
+# サンドボックス内ではキーチェーンが使えないため、認証はファイルストアに固定する。
 # 認証情報ファイルは `sbx cp` でサンドボックス作成後にコピーする
 # （internal/home 参照）。コピー先の親ディレクトリだけ先に用意しておく。
-RUN npm install -g @anthropic-ai/claude-code @openai/codex hunkdiff && \
-    mkdir -p /home/agent/.claude /home/agent/.codex
+ENV AGENT_CLI_CREDENTIAL_STORE=file
+RUN curl https://cursor.com/install -fsS | bash && \
+    npm install -g --ignore-scripts=false @anthropic-ai/claude-code @openai/codex hunkdiff && \
+    mkdir -p /home/agent/.claude /home/agent/.codex /home/agent/.config/cursor /home/agent/.cursor

@@ -1,9 +1,9 @@
 # agentsb
 
-Claude Code や Codex などを、ディレクトリ単位の microVM サンドボックスで動かす CLI です。
+Claude Code、Codex、Cursor Agentなどを、ディレクトリ単位の microVM サンドボックスで動かす CLI です。
 実行環境は [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/)（`sbx`）です。
 
-ディレクトリごとに 1 つのサンドボックスを持ちます。Claude の認証情報（`~/.claude/.credentials.json`、`~/.claude.json`）は、サンドボックス作成時にホストの `~/.agentsb/home` からコピーし（`sbx cp`）、セッション終了時に書き戻します。書き戻しは 2 ファイルをひと組として扱い、`.credentials.json`（OAuth トークン）の `claudeAiOauth.expiresAt` がホスト側より大きい場合だけ、`.claude.json`（オンボーディング状態や設定）と合わせて上書きします（並行セッションの古いトークンでリフレッシュ済みのものを巻き戻さないため）。Codex の `~/.codex/auth.json` はホスト側を正とし、`agentsb run` のたびにコンテナへコピーするだけで、書き戻しはしません。サンドボックスは `agentsb rm` で削除するまで維持されます。
+ディレクトリごとに 1 つのサンドボックスを持ちます。Claude の認証情報（`~/.claude/.credentials.json`、`~/.claude.json`）は、サンドボックス作成時にホストの `~/.agentsb/home` からコピーし（`sbx cp`）、セッション終了時に書き戻します。書き戻しは 2 ファイルをひと組として扱い、`.credentials.json`（OAuth トークン）の `claudeAiOauth.expiresAt` がホスト側より大きい場合だけ、`.claude.json`（オンボーディング状態や設定）と合わせて上書きします（並行セッションの古いトークンでリフレッシュ済みのものを巻き戻さないため）。Codex の `~/.codex/auth.json` と Cursor の auth.json（macOS: `~/.cursor/auth.json`、Linux: `~/.config/cursor/auth.json`）はホスト側を正とし、`agentsb run` のたびにコンテナへコピーするだけで、書き戻しはしません。サンドボックスは `agentsb rm` で削除するまで維持されます。
 
 ## 前提
 
@@ -39,9 +39,10 @@ agentsb run   # サンドボックスの zsh（login shell）に入る
 # サンドボックス内
 claude --dangerously-skip-permissions
 codex --dangerously-bypass-approvals-and-sandbox
+agent --yolo   # または cursor-agent --yolo
 ```
 
-CLI ツール（`claude` / `codex` / `hunkdiff`）は `/usr/local/share/npm-global` に入ります。サンドボックス内での更新は `npm install -g @openai/codex` のように **sudo なし**で行ってください（`sudo npm` は別の prefix を触ります）。テンプレートへ恒久反映する場合は Containerfile を編集して `sudo make install` → `agentsb build` → 対象ディレクトリで `agentsb rm` → `agentsb run` です。
+CLI ツールのうち `claude` / `codex` / `hunkdiff` は `/usr/local/share/npm-global`、`agent` / `cursor-agent` は公式 installer により `~/.local` 配下に入ります。npm 系の更新は `npm install -g @openai/codex` のように **sudo なし**で行ってください（`sudo npm` は別の prefix を触ります）。Cursor Agent の更新はサンドボックス内で `curl https://cursor.com/install -fsS | bash` するか、テンプレートをリビルドしてください。テンプレートへ恒久反映する場合は Containerfile を編集して `sudo make install` → `agentsb build` → 対象ディレクトリで `agentsb rm` → `agentsb run` です。
 
 | コマンド | 説明 |
 |----------|------|
@@ -123,6 +124,11 @@ value = "sk-..."
 name = "DEEPL_API_KEY"
 value = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx"
 domains = ["api.deepl.com", "api-free.deepl.com"]
+
+[[secret]]
+name = "CURSOR_API_KEY"
+value = "cursor_..."
+domains = ["api2.cursor.sh"]
 ```
 
 [組み込みサービス](https://docs.docker.com/ai/sandboxes/security/credentials/#built-in-services)（OpenAI 等）は `domains` 不要で `secret set`、それ以外は `domains` 付きで `set-custom` します。コンテナ内が `proxy-managed` / `sbx-cs-…` のままなのは正常です。プロジェクトの `.env` には関与しません。
@@ -146,7 +152,7 @@ agentsb が管理するデータ（初回の `agentsb run` で自動生成。手
 | パス | 役割 |
 |------|------|
 | `~/.agentsb/build/` | テンプレートビルド用の作業ディレクトリ。ビルド時に Containerfile と tar がここへ書き出される |
-| `~/.agentsb/home/` | Claude 認証情報（`.claude/.credentials.json`、`.claude.json`）を永続化し、サンドボックス作成時・セッション終了時に `sbx cp` でやり取りする（Codex の auth はホストの `~/.codex/auth.json` から都度コピー） |
+| `~/.agentsb/home/` | Claude 認証情報（`.claude/.credentials.json`、`.claude.json`）を永続化し、サンドボックス作成時・セッション終了時に `sbx cp` でやり取りする（Codex / Cursor の auth はホスト側から都度コピー） |
 | `~/.agentsb/logs/agentsb.log` | 動作検証用ログ（設定の有無、sbx CLI 呼び出し、dotfiles の有効/無効など） |
 | `~/.agentsb/secrets.toml.sha256` | シークレット同期スキップ判定用のハッシュ |
 
@@ -154,11 +160,18 @@ agentsb が管理するデータ（初回の `agentsb run` で自動生成。手
 
 Claude は初回だけサンドボックス内でログインしてください（セッション終了時に `~/.agentsb/home` へ書き戻されます）。Codex はホストでログイン済みの `~/.codex/auth.json` を使います。
 
+Cursor Agent はホストの auth.json を使います。macOS では既定でキーチェーンに保存されるため、次のいずれかが必要です。
+
+1. ホストで `export AGENT_CLI_CREDENTIAL_STORE=file` してから `agent login` し、`~/.cursor/auth.json` を作る
+2. `secrets.toml` に `CURSOR_API_KEY` を載せ、`domains = ["api2.cursor.sh"]` を付ける（プロキシ注入）
+
+サンドボックス内は `AGENT_CLI_CREDENTIAL_STORE=file` 固定です。
+
 ### herdr 連携
 
 [herdr](https://herdr.dev/) の pane 内で実行すると、pane の表示名（例: `claude (agentsb)`）を自動で herdr に報告します。
 
-エージェントの状態（working/blocked/idle）と完了の検出は herdr 自身に任せます。herdr はホストのプロセスツリーからエージェントを識別して画面内容から状態を検出するため、agentsb はセッション（`sbx exec`）プロセスの argv[0] をエージェント名に書き換えて、サンドボックス内のエージェントをホスト側から識別できるようにしています。agentsb は Claude Code 前提で常に `claude` を設定するため、Codex CLI を使った場合は herdr 側の状態表示が不正確になります（対応は別途検討）。herdr 外での実行には影響しません。
+エージェントの状態（working/blocked/idle）と完了の検出は herdr 自身に任せます。herdr はホストのプロセスツリーからエージェントを識別して画面内容から状態を検出するため、agentsb はセッション（`sbx exec`）プロセスの argv[0] をエージェント名に書き換えて、サンドボックス内のエージェントをホスト側から識別できるようにしています。agentsb は Claude Code 前提で常に `claude` を設定するため、Codex / Cursor Agent を使った場合は herdr 側の状態表示が不正確になります（対応は別途検討）。herdr 外での実行には影響しません。
 
 ## Acknowledgements
 

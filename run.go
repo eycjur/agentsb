@@ -109,6 +109,12 @@ func runRun(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("cannot inject codex auth: %w", err)
 	}
 
+	// Cursor Agent もホストの auth.json を正とし、毎回コンテナへコピーする
+	// （書き戻しなし）。無くてもエラーにはしない（CURSOR_API_KEY でも可）。
+	if err := home.InjectCursorAuth(runName); err != nil {
+		return fmt.Errorf("cannot inject cursor auth: %w", err)
+	}
+
 	// カスタムシークレットの対象ホストは allow されていないとプロキシが置換できない。
 	// policy はサンドボックス単位なので作成後に付ける。
 	if err := sandbox.AllowNetwork(runName, envsecret.Hosts(secrets)); err != nil {

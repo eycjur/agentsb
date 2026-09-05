@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"agentsb/internal/config"
 	"agentsb/internal/runlog"
@@ -35,8 +36,8 @@ type CredentialFile struct {
 // .credentials.json はセッション中にリフレッシュされる OAuth トークン、
 // .claude.json はオンボーディング状態や設定で、両者はひと組として扱い、
 // .credentials.json の expiresAt がホスト側より大きい（＝新しい）ときだけ
-// まとめて書き戻す。Codex の auth.json はここには含めず、ホストの
-// ~/.codex/auth.json を InjectCodexAuth で一方通行コピーする。
+// まとめて書き戻す。Codex / Cursor の auth.json はここには含めず、ホスト側を
+// InjectCodexAuth / InjectCursorAuth で一方通行コピーする。
 var credentialRelPaths = []string{credentialsRel, ".claude.json"}
 
 // EnsureCredentialFiles はコピー先ディレクトリの存在を保証し、サンドボックス
@@ -85,6 +86,66 @@ func InjectCodexAuth(runName string) error {
 		return fmt.Errorf("cannot fix ownership of %s: %w", containerPath, err)
 	}
 	runlog.Notice("codex auth: copied %s -> sandbox:%s", hostPath, containerPath)
+	return nil
+}
+
+// cursorAuthRel は Linux サンドボックス側の Cursor CLI 認証ファイル
+// （AGENT_CLI_CREDENTIAL_STORE=file 時の既定パス）の home からの相対パス。
+var cursorAuthRel = filepath.Join(".config", "cursor", "auth.json")
+
+// hostCursorAuthCandidates はホスト上で Cursor CLI の auth.json を探す候補。
+// macOS は ~/.cursor/auth.json（ファイルストア時）、Linux は
+// ~/.config/cursor/auth.json（XDG）。キーチェーンのみの macOS ではどちらも
+// 無いことがある（CURSOR_API_KEY か AGENT_CLI_CREDENTIAL_STORE=file でログイン）。
+func hostCursorAuthCandidates(homeDir string) []string {
+	return []string{
+		filepath.Join(homeDir, ".cursor", "auth.json"),
+		filepath.Join(homeDir, ".config", "cursor", "auth.json"),
+	}
+}
+
+// findHostCursorAuth は存在するホスト側 auth.json のパスを返す。
+func findHostCursorAuth(homeDir string) (string, bool, error) {
+	var firstMissing string
+	for _, p := range hostCursorAuthCandidates(homeDir) {
+		_, err := os.Stat(p)
+		if err == nil {
+			return p, true, nil
+		}
+		if !os.IsNotExist(err) {
+			return "", false, fmt.Errorf("cannot stat %s: %w", p, err)
+		}
+		if firstMissing == "" {
+			firstMissing = p
+		}
+	}
+	return firstMissing, false, nil
+}
+
+// InjectCursorAuth はホストの Cursor CLI auth.json をサンドボックスへコピーする。
+// 書き戻しはしない（ホスト側が正）。ファイルが無ければ何もしない。
+func InjectCursorAuth(runName string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	hostPath, ok, err := findHostCursorAuth(homeDir)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		runlog.Notice("cursor auth: skip (host file not found; tried %s)",
+			strings.Join(hostCursorAuthCandidates(homeDir), ", "))
+		return nil
+	}
+	containerPath := filepath.Join(sandbox.HomeDir, cursorAuthRel)
+	if err := sandbox.CopyToSandbox(runName, hostPath, containerPath); err != nil {
+		return fmt.Errorf("cannot inject %s: %w", containerPath, err)
+	}
+	if err := sandbox.ChownAgent(runName, containerPath); err != nil {
+		return fmt.Errorf("cannot fix ownership of %s: %w", containerPath, err)
+	}
+	runlog.Notice("cursor auth: copied %s -> sandbox:%s", hostPath, containerPath)
 	return nil
 }
 
