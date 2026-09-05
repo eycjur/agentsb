@@ -254,28 +254,6 @@ func ChownAgent(name, path string) error {
 	return err
 }
 
-// ModTime はサンドボックス内のファイルの更新時刻を返す。
-func ModTime(name, path string) (time.Time, error) {
-	out, err := runCLI(cliTimeout, "exec", name, "stat", "-c", "%Y", path)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("stat %s: %w", path, err)
-	}
-	sec, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("parse mtime of %s: %w", path, err)
-	}
-	return time.Unix(sec, 0), nil
-}
-
-// SetModTime はサンドボックス内のファイルの更新時刻を t に設定する。
-// InjectCredentials 直後にホスト側の mtime を写すために使う — こうしないと
-// cp によるコピー自体がサンドボックス側の mtime をコピー時刻で更新してしまい、
-// 以後の「新しい方だけ書き戻す」判定が常に真になってしまう。
-func SetModTime(name, path string, t time.Time) error {
-	_, err := runCLI(cliTimeout, "exec", name, "touch", "-d", fmt.Sprintf("@%d", t.Unix()), path)
-	return err
-}
-
 // PathExists はサンドボックス内に指定パスが存在するかを返す。
 // cp のエラーメッセージに頼らず `exec ... test -e` で明示的に確認する。
 func PathExists(name, path string) (bool, error) {

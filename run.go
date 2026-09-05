@@ -97,6 +97,10 @@ func runRun(_ *cobra.Command, _ []string) error {
 		if err := home.InjectCredentials(runName, credFiles); err != nil {
 			return fmt.Errorf("cannot inject credentials: %w", err)
 		}
+	} else {
+		// 既存サンドボックスには作成時にコピー済みで、セッション中に更新された
+		// トークンはサンドボックス側が新しいので上書きしない。
+		runlog.Notice("claude credentials: skip inject (reusing sandbox %s)", runName)
 	}
 
 	// Codex はホストの ~/.codex/auth.json を正とし、毎回コンテナへコピーする

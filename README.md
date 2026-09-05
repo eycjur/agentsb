@@ -3,7 +3,7 @@
 Claude Code や Codex などを、ディレクトリ単位の microVM サンドボックスで動かす CLI です。
 実行環境は [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/)（`sbx`）です。
 
-ディレクトリごとに 1 つのサンドボックスを持ちます。Claude の認証情報（`~/.claude/.credentials.json`、`~/.claude.json`）は、サンドボックス作成時にホストの `~/.agentsb/home` からコピーし（`sbx cp`）、セッション終了時に書き戻します。`.credentials.json`（OAuth トークン）は無条件で上書き、`.claude.json`（オンボーディング状態や設定）はサンドボックス側で更新された場合だけホストへ反映します。Codex の `~/.codex/auth.json` はホスト側を正とし、`agentsb run` のたびにコンテナへコピーするだけで、書き戻しはしません。サンドボックスは `agentsb rm` で削除するまで維持されます。
+ディレクトリごとに 1 つのサンドボックスを持ちます。Claude の認証情報（`~/.claude/.credentials.json`、`~/.claude.json`）は、サンドボックス作成時にホストの `~/.agentsb/home` からコピーし（`sbx cp`）、セッション終了時に書き戻します。書き戻しは 2 ファイルをひと組として扱い、`.credentials.json`（OAuth トークン）の `claudeAiOauth.expiresAt` がホスト側より大きい場合だけ、`.claude.json`（オンボーディング状態や設定）と合わせて上書きします（並行セッションの古いトークンでリフレッシュ済みのものを巻き戻さないため）。Codex の `~/.codex/auth.json` はホスト側を正とし、`agentsb run` のたびにコンテナへコピーするだけで、書き戻しはしません。サンドボックスは `agentsb rm` で削除するまで維持されます。
 
 ## 前提
 
