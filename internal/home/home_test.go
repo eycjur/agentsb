@@ -1,10 +1,6 @@
 package home
 
-import (
-	"os"
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
 func TestTokenIsNewer(t *testing.T) {
 	newer := []byte(`{"claudeAiOauth":{"accessToken":"a","expiresAt":1788601765914}}`)
@@ -39,55 +35,4 @@ func TestTokenIsNewer(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestFindHostCursorAuth(t *testing.T) {
-	home := t.TempDir()
-	darwinPath := filepath.Join(home, ".cursor", "auth.json")
-	linuxPath := filepath.Join(home, ".config", "cursor", "auth.json")
-
-	t.Run("none", func(t *testing.T) {
-		got, ok, err := findHostCursorAuth(home)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if ok {
-			t.Fatalf("expected missing, got %s", got)
-		}
-		if got != darwinPath {
-			t.Fatalf("firstMissing = %q, want %q", got, darwinPath)
-		}
-	})
-
-	t.Run("linux only", func(t *testing.T) {
-		if err := os.MkdirAll(filepath.Dir(linuxPath), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(linuxPath, []byte(`{}`), 0600); err != nil {
-			t.Fatal(err)
-		}
-		got, ok, err := findHostCursorAuth(home)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !ok || got != linuxPath {
-			t.Fatalf("got (%v, %q), want linux %q", ok, got, linuxPath)
-		}
-	})
-
-	t.Run("darwin preferred", func(t *testing.T) {
-		if err := os.MkdirAll(filepath.Dir(darwinPath), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(darwinPath, []byte(`{}`), 0600); err != nil {
-			t.Fatal(err)
-		}
-		got, ok, err := findHostCursorAuth(home)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !ok || got != darwinPath {
-			t.Fatalf("got (%v, %q), want darwin %q", ok, got, darwinPath)
-		}
-	})
 }
