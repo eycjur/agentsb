@@ -6,7 +6,9 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -15,6 +17,9 @@ import (
 
 	"agentsb/internal/runlog"
 )
+
+//go:embed kits/ssh-agent/ssh-agent.yaml
+var sshAgentKitYAML []byte
 
 const (
 	// HomeDir はサンドボックス側の agent ユーザーの home ディレクトリ。
@@ -80,15 +85,41 @@ func runCLI(timeout time.Duration, args ...string) ([]byte, error) {
 // docker/sandbox-templates:shell を拡張するため `shell` 固定。
 // リソースは指定せず sbx のデフォルト（CPU: ホストの全 CPU、メモリ: ホストの
 // 50%・上限 32 GiB）に任せる。
-func Create(name, template, workspace string) error {
-	if _, err := runCLI(slowTimeout,
-		"create", "--name", name, "--template", template, "shell", workspace,
-	); err != nil {
+// forwardSSH が true のとき、v3 の shell kit は ssh-agent を要求しないため
+// mixin を足す。要求が無いサンドボックスには SSH_AUTH_SOCK が渡らない。
+func Create(name, template, workspace string, forwardSSH bool) error {
+	args := []string{"create", "--name", name, "--template", template}
+	var kitDir string
+	if forwardSSH {
+		var err error
+		kitDir, err = writeSSHAgentKit()
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(kitDir)
+		args = append(args, "--kit", kitDir)
+		runlog.Info("sbx create will request ssh-agent@1 via %s", kitDir)
+	}
+	args = append(args, "shell", workspace)
+	if _, err := runCLI(slowTimeout, args...); err != nil {
 		return fmt.Errorf("sbx create: %w", err)
 	}
-	runlog.Info("created sandbox %s template=%s workspace=%s", name, template, workspace)
+	runlog.Info("created sandbox %s template=%s workspace=%s forwardSSH=%v", name, template, workspace, forwardSSH)
 	StopShellAptRefresh(name)
 	return nil
+}
+
+func writeSSHAgentKit() (string, error) {
+	dir, err := os.MkdirTemp("", "agentsb-ssh-agent-kit-*")
+	if err != nil {
+		return "", fmt.Errorf("cannot create ssh-agent kit dir: %w", err)
+	}
+	path := filepath.Join(dir, "ssh-agent.yaml")
+	if err := os.WriteFile(path, sshAgentKitYAML, 0o644); err != nil {
+		os.RemoveAll(dir)
+		return "", fmt.Errorf("cannot write ssh-agent kit: %w", err)
+	}
+	return dir, nil
 }
 
 // StopShellAptRefresh は sbx の shell エージェントが起動時にバックグラウンドで

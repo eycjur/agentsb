@@ -30,13 +30,15 @@ type SecretsConfig struct {
 	Ref    string `toml:"ref"`
 }
 
-// SSHConfig はホスト SSH agent の転送準備。
+// SSHConfig はホスト SSH agent の転送準備と、~/.ssh/config の共有。
 // identity_agent は OpenSSH の IdentityAgent と同様、agent ソケットのパス
 // （例: 1Password の agent.sock）。非空のとき agentsb run はそれを
 // SSH_AUTH_SOCK に載せ、GitHub SSH の network allow と転送プローブを行う。
 // 転送そのものは sbx が行う（秘密鍵はサンドボックスへコピーしない）。
+// share_config が true のときだけ、ホストの ~/.ssh/config をサンドボックスへコピーする。
 type SSHConfig struct {
-	IdentityAgent string `toml:"identity_agent"` // ~ 展開可。空なら SSH 処理をスキップ
+	IdentityAgent string `toml:"identity_agent"` // ~ 展開可。空なら agent 転送をスキップ
+	ShareConfig   bool   `toml:"share_config"`   // true のとき ~/.ssh/config を共有する
 }
 
 // Root はデータディレクトリ ~/.agentsb を返す（home / build / logs など）。

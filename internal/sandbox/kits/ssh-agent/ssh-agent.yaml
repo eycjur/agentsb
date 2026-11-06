@@ -1,0 +1,10 @@
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
+kind: mixin
+displayName: SSH agent
+
+capabilities:
+  - type: com.docker.sandbox/ssh-agent@1
+    description: Forward the host SSH agent into the sandbox
+    config:
+      phase: runtime

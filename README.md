@@ -122,6 +122,7 @@ install_command = "install.sh"
 # ホストの SSH agent を利用（例: 1Password）
 [ssh]
 identity_agent = "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+share_config   = true
 
 # シークレットを 1Password から読む場合
 # [secrets]
@@ -155,7 +156,20 @@ export SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/
 3. GitHub SSH の接続先 `IP:22` をネットワークポリシーで許可
 4. サンドボックス内でも `ssh-add -l` を実行。失敗時は警告して続行
 
-未設定なら SSH 関連の処理はしません。転送は [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/security/credentials/#ssh-agent) が行い、秘密鍵はコピーしません。
+未設定なら agent 転送はしません。転送は [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/security/credentials/#ssh-agent) が行い、秘密鍵はコピーしません。
+
+sbx 0.51 以降の shell は v3 kit で、`ssh-agent` を要求したサンドボックスにだけソケットを渡します。`identity_agent` があるとき、`agentsb` は作成時にその要求を足します。この変更より前に作ったサンドボックスには渡らないので、`agentsb rm` してから `agentsb run` し直してください。
+
+### SSH config
+
+`[ssh].share_config` を `true` にしたときだけ、ホストの `~/.ssh/config` を `agentsb run` のたびにサンドボックスの `~/.ssh/config` へコピーします。未設定または `false` ならコピーしません。ホスト側が正なので、サンドボックス内の変更は次の run で上書きされます。書き戻しはしません。
+
+コピー時に `IdentityAgent` のパスは、サンドボックス内の転送ソケット `/run/ssh-agent.sock` に書き換えます。ホストの `~/Library/...` のまま置くと、`~` が `/home/agent` に展開されて届きません。`IdentityAgent none` はそのまま残します。次の行は除きます。
+
+- `IdentityFile`
+- `IdentitiesOnly`
+
+`Include` は読み込んで 1 ファイルにまとめます。秘密鍵のファイルはコピーしません。ネットワーク許可はこれまでどおり GitHub の 22 番だけなので、config に他のホストがあっても、そこへの接続はポリシーで止まります。
 
 ### シークレット（プロキシ注入）
 

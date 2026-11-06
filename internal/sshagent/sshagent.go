@@ -1,7 +1,8 @@
-// Package sshagent はホスト SSH agent の転送準備を行う。
+// Package sshagent はホスト SSH agent の転送準備と、~/.ssh/config の共有を行う。
 // 転送そのものは sbx がホストの SSH_AUTH_SOCK を見て行う。
 // agentsb はホスト側の前提確認（IdentityAgent → SSH_AUTH_SOCK）、
-// GitHub SSH 向け network allow、サンドボックス内プローブまでを担当する。
+// GitHub SSH 向け network allow、サンドボックス内プローブ、
+// ホスト専用の指定を除いた ssh config のコピーまでを担当する。
 package sshagent
 
 import (

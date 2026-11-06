@@ -91,7 +91,7 @@ func runRun(_ *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
-		if err := sandbox.Create(runName, templateTag, cwd); err != nil {
+		if err := sandbox.Create(runName, templateTag, cwd, cfg.SSH.IdentityAgent != ""); err != nil {
 			return err
 		}
 		if err := home.InjectCredentials(runName, credFiles); err != nil {
@@ -107,6 +107,14 @@ func runRun(_ *cobra.Command, _ []string) error {
 	// （書き戻しなし）。無くてもエラーにはしない。
 	if err := home.InjectCodexAuth(runName); err != nil {
 		return fmt.Errorf("cannot inject codex auth: %w", err)
+	}
+
+	// [ssh].share_config のときだけ ~/.ssh/config をコピーする。
+	// ホスト側が正で毎回上書きし、書き戻しはしない。agent 転送とは独立。
+	if cfg.SSH.ShareConfig {
+		if err := sshagent.InjectConfig(runName); err != nil {
+			return fmt.Errorf("ssh config: %w", err)
+		}
 	}
 
 	// カスタムシークレットの対象ホストは allow されていないとプロキシが置換できない。
@@ -186,6 +194,11 @@ func logConfig(cfg config.Config) {
 		runlog.Info("config ssh identity_agent=%q", cfg.SSH.IdentityAgent)
 	} else {
 		runlog.Info("config ssh identity_agent=disabled")
+	}
+	if cfg.SSH.ShareConfig {
+		runlog.Info("config ssh share_config=enabled")
+	} else {
+		runlog.Info("config ssh share_config=disabled")
 	}
 }
 
