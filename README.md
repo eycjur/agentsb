@@ -31,6 +31,16 @@ sudo make install
 
 `PREFIX`（既定: `/usr/local/bin`）へビルドして配置します。再実行すると上書き更新されます。
 
+### シェル補完
+
+サブコマンドとフラグ、`stop` / `rm` のサンドボックス名を補完できます。zsh では `~/.zshrc` に次を追記します（`compinit` を有効にしておく必要があります）。
+
+```zsh
+source <(agentsb completion zsh)
+```
+
+bash と fish については `agentsb completion --help` を参照してください。
+
 ## 使い方
 
 作業ディレクトリで実行します。テンプレートのビルドとサンドボックスの作成は、必要な場合だけ自動で行われます。

@@ -62,19 +62,21 @@ var rootCmd = &cobra.Command{
 
 // runCmd は agentsb run コマンド。エージェント用サンドボックスを起動する。
 var runCmd = &cobra.Command{
-	Use:     "run",
-	Aliases: []string{"exec"},
-	Short:   "Enter the sandbox for the current directory (builds and creates it as needed)",
-	Args:    cobra.NoArgs,
-	RunE:    runRun,
+	Use:               "run",
+	ValidArgsFunction: cobra.NoFileCompletions,
+	Aliases:           []string{"exec"},
+	Short:             "Enter the sandbox for the current directory (builds and creates it as needed)",
+	Args:              cobra.NoArgs,
+	RunE:              runRun,
 }
 
 // buildCmd は agentsb build コマンド。テンプレートを強制リビルドして sbx へ
 // ロードし直し、古いテンプレートを prune する。
 var buildCmd = &cobra.Command{
-	Use:   "build",
-	Short: "Force rebuild the sandbox template (picks up base image or tool updates)",
-	Args:  cobra.NoArgs,
+	Use:               "build",
+	ValidArgsFunction: cobra.NoFileCompletions,
+	Short:             "Force rebuild the sandbox template (picks up base image or tool updates)",
+	Args:              cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := sandbox.CheckCLI(); err != nil {
 			return err
@@ -91,10 +93,11 @@ var buildCmd = &cobra.Command{
 // lsCmd は agentsb ls コマンド。agentsb 管理サンドボックスを一覧する。
 // NAME は完全名から agentsb- を削ったもの、SBX NAME は sbx 上の完全名。
 var lsCmd = &cobra.Command{
-	Use:     "ls",
-	Aliases: []string{"list", "ps"},
-	Short:   "List agentsb sandboxes (including stopped)",
-	Args:    cobra.NoArgs,
+	Use:               "ls",
+	ValidArgsFunction: cobra.NoFileCompletions,
+	Aliases:           []string{"list", "ps"},
+	Short:             "List agentsb sandboxes (including stopped)",
+	Args:              cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := sandbox.CheckCLI(); err != nil {
 			return err
@@ -170,6 +173,27 @@ func targetNames(args []string) ([]string, error) {
 	return names, nil
 }
 
+// completeSandboxNames は stop / rm の引数補完。agentsb 管理のサンドボックス名を
+// NamePrefix を除いた形で候補に出し、入力済みの名前は除く（targetNames は
+// どちらの形も受け付ける）。ファイル名補完には落とさない。
+func completeSandboxNames(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+	names, err := sandbox.AgentsbNames()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveError | cobra.ShellCompDirectiveNoFileComp
+	}
+	given := map[string]bool{}
+	for _, a := range args {
+		given[strings.TrimPrefix(a, sandbox.NamePrefix)] = true
+	}
+	var result []string
+	for _, n := range names {
+		if short := strings.TrimPrefix(n, sandbox.NamePrefix); !given[short] {
+			result = append(result, short)
+		}
+	}
+	return result, cobra.ShellCompDirectiveNoFileComp
+}
+
 // targetName は targetNames の単一名版。
 func targetName(args []string) (string, error) {
 	names, err := targetNames(args)
@@ -184,8 +208,9 @@ func targetName(args []string) (string, error) {
 // 複数名を指定すると順に停止する。1件の失敗で残りの停止を止めないため、
 // エラーはまとめて末尾で報告する（prune と同じ方針）。
 var stopCmd = &cobra.Command{
-	Use:   "stop [name...]",
-	Short: "Stop one or more running sandboxes (state is kept; the next run resumes it; defaults to the current directory's)",
+	Use:               "stop [name...]",
+	ValidArgsFunction: completeSandboxNames,
+	Short:             "Stop one or more running sandboxes (state is kept; the next run resumes it; defaults to the current directory's)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := sandbox.CheckCLI(); err != nil {
 			return err
@@ -221,9 +246,10 @@ var secretCmd = &cobra.Command{
 
 // secretClearCmd は sbx に登録済みのシークレットをすべて削除する。
 var secretClearCmd = &cobra.Command{
-	Use:   "clear",
-	Short: "Remove all sbx secrets (global and sandbox-scoped)",
-	Args:  cobra.NoArgs,
+	Use:               "clear",
+	ValidArgsFunction: cobra.NoFileCompletions,
+	Short:             "Remove all sbx secrets (global and sandbox-scoped)",
+	Args:              cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := sandbox.CheckCLI(); err != nil {
 			return err
@@ -236,9 +262,10 @@ var secretClearCmd = &cobra.Command{
 // 全テンプレート・認証情報・ビルド作業ディレクトリを削除するフルリセット。
 // 認証情報が消えるため次回 run では各サンドボックスで再ログインが必要になる。
 var pruneCmd = &cobra.Command{
-	Use:   "prune",
-	Short: "Remove all agentsb sandboxes, templates, and stored credentials (full reset)",
-	Args:  cobra.NoArgs,
+	Use:               "prune",
+	ValidArgsFunction: cobra.NoFileCompletions,
+	Short:             "Remove all agentsb sandboxes, templates, and stored credentials (full reset)",
+	Args:              cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if !pruneYes && !confirmPrune() {
 			fmt.Println("aborted")
@@ -292,9 +319,10 @@ func confirmPrune() bool {
 // microVM のためサンドボックスの IP へ直接は届かず、`sbx ports --publish` で
 // 明示的に公開して localhost 経由でアクセスする。
 var openCmd = &cobra.Command{
-	Use:   "open [port]",
-	Short: "Publish the sandbox's port and open it in the browser (defaults to port 8000)",
-	Args:  cobra.MaximumNArgs(1),
+	Use:               "open [port]",
+	ValidArgsFunction: cobra.NoFileCompletions,
+	Short:             "Publish the sandbox's port and open it in the browser (defaults to port 8000)",
+	Args:              cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := sandbox.CheckCLI(); err != nil {
 			return err
@@ -343,9 +371,10 @@ var openCmd = &cobra.Command{
 // する。複数名を指定すると順に削除する。1件の失敗で残りの削除を止めないため、
 // エラーはまとめて末尾で報告する（prune と同じ方針）。
 var rmCmd = &cobra.Command{
-	Use:     "rm [name...]",
-	Aliases: []string{"delete", "remove"},
-	Short:   "Remove one or more sandboxes (defaults to the current directory's)",
+	Use:               "rm [name...]",
+	ValidArgsFunction: completeSandboxNames,
+	Aliases:           []string{"delete", "remove"},
+	Short:             "Remove one or more sandboxes (defaults to the current directory's)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := sandbox.CheckCLI(); err != nil {
 			return err
